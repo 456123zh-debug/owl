@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"syscall"
 	"time"
 
 	"github.com/gowvp/owl/internal/notify"
@@ -399,25 +398,6 @@ func (c Core) batchDeleteRecordings(ctx context.Context, reason string, filter *
 	}
 
 	return
-}
-
-// getDiskUsage 获取指定路径所在磁盘的使用率（百分比）
-func getDiskUsage(path string) (float64, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
-		return 0, err
-	}
-
-	total := stat.Blocks * uint64(stat.Bsize)
-	free := stat.Bavail * uint64(stat.Bsize)
-	used := total - free
-
-	if total == 0 {
-		return 0, nil
-	}
-
-	usage := float64(used) / float64(total) * 100
-	return usage, nil
 }
 
 // getAbsStorageDir 返回录像存储目录的绝对路径

@@ -106,7 +106,7 @@
   # 媒体服务器 HTTP 端口
   HTTPPort = 8080
   # 媒体服务器密钥
-  Secret = 'jvRqCAzEg7AszBi4gm1cfhwXpmnVmJMG'
+  Secret = '882e041f6e489fe77a4af9b272806c25'
   # 媒体服务器类型 zlm/lalmax
   Type = 'zlm'
   # 用于流媒体 webhook 回调

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -138,21 +139,36 @@ func isContainerEnv() bool {
 }
 
 func setupZLM(ctx context.Context, dir string) {
-	// 兼容多种容器运行时以及通过环境变量强制启用
-	if !(isContainerEnv() || os.Getenv("NVR_STREAM") == "ZLM") {
+	// 兼容多种容器运行时、手动强制启用，以及一键启动包模式
+	oneClick := os.Getenv("OWL_ONE_CLICK") == "1"
+	if !(isContainerEnv() || os.Getenv("NVR_STREAM") == "ZLM" || oneClick) {
 		slog.Info("未在容器环境中运行，跳过启动 zlm")
 		return
 	}
 
-	// 检查 MediaServer 文件是否存在
-	mediaServerPath := filepath.Join(system.Getwd(), "MediaServer")
-	if _, err := os.Stat(mediaServerPath); os.IsNotExist(err) {
-		slog.Info("MediaServer 文件不存在", "path", mediaServerPath)
+	workDir := system.Getwd()
+	mediaServerPath := findMediaServerBinary(workDir)
+	if mediaServerPath == "" {
+		slog.Info("MediaServer 文件不存在", "workdir", workDir)
 		return
 	}
 
-	workDir := system.Getwd()
 	configPath := filepath.Join(dir, "zlm.ini")
+	if oneClick {
+		if pkgConfig := filepath.Join(workDir, "MediaServer", "config.ini"); fileExists(pkgConfig) {
+			configPath = pkgConfig
+		}
+	}
+	if !fileExists(configPath) {
+		slog.Info("MediaServer 配置文件不存在", "path", configPath)
+		return
+	}
+
+	args := []string{}
+	if certPath := filepath.Join(workDir, "MediaServer", "default.pem"); fileExists(certPath) {
+		args = append(args, "-s", certPath)
+	}
+	args = append(args, "-c", configPath)
 
 	for {
 		select {
@@ -161,7 +177,7 @@ func setupZLM(ctx context.Context, dir string) {
 			return
 		default:
 			slog.Info("MediaServer 启动中...")
-			cmd := exec.CommandContext(ctx, "./MediaServer", "-s", "default.pem", "-c", configPath)
+			cmd := exec.CommandContext(ctx, mediaServerPath, args...)
 			cmd.Dir = workDir
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
@@ -178,6 +194,34 @@ func setupZLM(ctx context.Context, dir string) {
 			time.Sleep(2 * time.Second)
 		}
 	}
+}
+
+func findMediaServerBinary(workDir string) string {
+	candidates := []string{
+		filepath.Join(workDir, "MediaServer"),
+		filepath.Join(workDir, "MediaServer.exe"),
+		filepath.Join(workDir, "MediaServer", "MediaServer"),
+		filepath.Join(workDir, "MediaServer", "MediaServer.exe"),
+	}
+	if runtime.GOOS == "windows" {
+		candidates = []string{
+			filepath.Join(workDir, "MediaServer.exe"),
+			filepath.Join(workDir, "MediaServer", "MediaServer.exe"),
+			filepath.Join(workDir, "MediaServer"),
+			filepath.Join(workDir, "MediaServer", "MediaServer"),
+		}
+	}
+	for _, path := range candidates {
+		if fileExists(path) {
+			return path
+		}
+	}
+	return ""
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func findPythonPath() string {

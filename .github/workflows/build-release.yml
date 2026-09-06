@@ -1,4 +1,4 @@
-name: Build on Release
+name: Build Release Packages
 
 on:
   release:
@@ -8,32 +8,183 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  linux:
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout code
+      - name: Checkout owl
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 10
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.26.0-rc.1"
 
-      - name: Build Linux binaries
-        run: make build/linux
-
-      - name: Prepare release assets
+      - name: Build owl
         run: |
-          mv build/linux_amd64/bin linux_amd64
-          mv build/linux_arm64/bin linux_arm64
+          mkdir -p build/linux_amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags="-s -w \
+              -X main.release=true" \
+            -o build/linux_amd64/owl ./main.go
+
+      - name: Fetch frontend assets
+        run: |
+          curl -L -o www.zip https://github.com/gowvp/gb28181_web/releases/latest/download/www.zip
+          unzip -q www.zip -d package/owl-linux-amd64
+
+      - name: Extract MediaServer from official image
+        run: |
+          mkdir -p package/owl-linux-amd64/MediaServer
+          cid=$(docker create zlmediakit/zlmediakit:master)
+          docker cp "$cid:/opt/media/bin/." package/owl-linux-amd64/MediaServer/
+          docker rm "$cid"
+
+      - name: Assemble package
+        run: |
+          mkdir -p package/owl-linux-amd64/configs package/owl-linux-amd64/run
+          cp build/linux_amd64/owl package/owl-linux-amd64/owl
+          cp packaging/linux/start.sh package/owl-linux-amd64/start.sh
+          cp packaging/linux/stop.sh package/owl-linux-amd64/stop.sh
+          cp packaging/linux/README.txt package/owl-linux-amd64/README.txt
+          cp configs/config.toml package/owl-linux-amd64/configs/config.toml
+          python - <<'PY'
+from pathlib import Path
+import re
+path = Path("package/owl-linux-amd64/configs/config.toml")
+text = path.read_text()
+for key in ("Host", "IP", "WebHookIP", "SDPIP"):
+    text = re.sub(rf"(?m)^(\s*{key} = )'[^']*'", r"\1'127.0.0.1'", text)
+path.write_text(text)
+PY
+          chmod +x package/owl-linux-amd64/start.sh package/owl-linux-amd64/stop.sh package/owl-linux-amd64/owl
+          tar -C package -czf owl-linux-amd64.tar.gz owl-linux-amd64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: owl-linux-amd64
+          path: owl-linux-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout owl
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0-rc.1"
+
+      - name: Build owl
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build\windows_amd64 | Out-Null
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          go build -trimpath -ldflags "-s -w -X main.release=true" -o build/windows_amd64/owl.exe ./main.go
+
+      - name: Fetch frontend assets
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/gowvp/gb28181_web/releases/latest/download/www.zip" -OutFile www.zip
+          Expand-Archive -Path www.zip -DestinationPath package/owl-windows-amd64 -Force
+
+      - name: Checkout ZLMediaKit
+        uses: actions/checkout@v4
+        with:
+          repository: ZLMediaKit/ZLMediaKit
+          path: zlm
+
+      - name: Download ZLMediaKit submodules
+        shell: pwsh
+        working-directory: zlm
+        run: |
+          if (Test-Path .gitmodules_github) {
+            Move-Item .gitmodules_github .gitmodules -Force
+          }
+          git submodule sync
+          git submodule update --init
+
+      - name: Configure vcpkg
+        uses: lukka/run-vcpkg@v7
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/zlm/vcpkg'
+          vcpkgTriplet: x64-windows-static
+          vcpkgGitCommitId: 'efcfaaf60d7ec57a159fc3110403d939bfb69729'
+          vcpkgArguments: 'openssl libsrtp[openssl] usrsctp'
+
+      - name: Build ZLMediaKit
+        shell: pwsh
+        working-directory: zlm
+        run: |
+          $toolchain = "$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$toolchain"
+          cmake --build build --config Release --target MediaServer -j 2
+
+      - name: Assemble package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package\owl-windows-amd64\configs | Out-Null
+          New-Item -ItemType Directory -Force -Path package\owl-windows-amd64\run | Out-Null
+          New-Item -ItemType Directory -Force -Path package\owl-windows-amd64\MediaServer | Out-Null
+
+          Copy-Item build\windows_amd64\owl.exe package\owl-windows-amd64\owl.exe -Force
+          Copy-Item packaging\windows\start.bat package\owl-windows-amd64\start.bat -Force
+          Copy-Item packaging\windows\stop.bat package\owl-windows-amd64\stop.bat -Force
+          Copy-Item packaging\windows\README.txt package\owl-windows-amd64\README.txt -Force
+          Copy-Item configs\config.toml package\owl-windows-amd64\configs\config.toml -Force
+
+          $cfg = Get-Content package\owl-windows-amd64\configs\config.toml -Raw
+          foreach ($key in 'Host','IP','WebHookIP','SDPIP') {
+            $cfg = [regex]::Replace($cfg, "(?m)^(\s*$key = )'[^']*'", "`$1'127.0.0.1'")
+          }
+          Set-Content package\owl-windows-amd64\configs\config.toml -Value $cfg -Encoding UTF8
+
+          $media = Get-ChildItem zlm -Recurse -Filter MediaServer.exe | Select-Object -First 1
+          if (-not $media) { throw 'MediaServer.exe not found after ZLMediaKit build' }
+          Copy-Item $media.FullName package\owl-windows-amd64\MediaServer\MediaServer.exe -Force
+
+          $mediaDir = $media.Directory.FullName
+          foreach ($name in 'config.ini','default.pem') {
+            $candidate = Join-Path $mediaDir $name
+            if (Test-Path $candidate) {
+              Copy-Item $candidate ("package\owl-windows-amd64\MediaServer\" + $name) -Force
+            }
+          }
+
+          if (Test-Path package\owl-windows-amd64.zip) { Remove-Item package\owl-windows-amd64.zip -Force }
+          Compress-Archive -Path package\owl-windows-amd64 -DestinationPath owl-windows-amd64.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: owl-windows-amd64
+          path: owl-windows-amd64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [linux, windows]
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Collect files
+        run: |
+          find release-assets -type f | sort
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            linux_amd64
-            linux_arm64
+            release-assets/**/owl-linux-amd64.tar.gz
+            release-assets/**/owl-windows-amd64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
