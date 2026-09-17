@@ -4,18 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gowvp/owl/internal/conf"
 	"github.com/gowvp/owl/internal/core/recording"
 	"github.com/gowvp/owl/internal/core/recording/stores/recordingdb"
-	"github.com/grafov/m3u8"
 	"github.com/ixugo/goddd/pkg/orm"
+	"github.com/ixugo/goddd/pkg/reason"
+	"github.com/ixugo/goddd/pkg/system"
 	"github.com/ixugo/goddd/pkg/web"
 	"gorm.io/gorm"
 )
@@ -61,28 +67,20 @@ func NewRecordingAPI(core recording.Core, conf *conf.Bootstrap) RecordingAPI {
 }
 
 // recordingIDInput 录像 ID 路径参数
-type recordingIDInput struct {
-	ID int64 `uri:"id" binding:"required"`
-}
-
-// updateRecordingInput 更新录像的请求参数（路径 ID + 请求体）
-type updateRecordingInput struct {
-	ID int64 `uri:"id" binding:"required"`
-	recording.EditRecordingInput
+type recordingPlayOutput struct {
+	URL string `json:"url"`
 }
 
 func RegisterRecording(g gin.IRouter, api RecordingAPI, handler ...gin.HandlerFunc) {
 	{
 		group := g.Group("/recordings", handler...)
-		group.GET("", web.WrapH(api.listRecordings))
+		group.GET("/play", web.WrapH(api.getPlayURL))
 		group.GET("/timeline", web.WrapH(api.getTimeline))
 		group.GET("/monthly", web.WrapH(api.getMonthlyStats))
-		// HLS 播放列表（根据通道 ID 和时间范围生成 m3u8）
+		group.DELETE("", web.WrapH(api.deleteRange))
+		group.GET("/download", api.downloadRange)
+		// Internal HLS route consumed by players; it is intentionally omitted from OpenAPI.
 		group.GET("/channels/:cid/index.m3u8", api.channelPlaylist)
-		group.GET("/:id", web.WrapH(api.getRecording))
-		group.PUT("/:id", web.WrapH(api.updateRecording))
-		group.DELETE("/:id", web.WrapH(api.deleteRecording))
-		group.GET("/:id/download", api.downloadRecording)
 	}
 
 	// 静态文件服务，用于访问录像 MP4 文件
@@ -94,11 +92,15 @@ func RegisterRecording(g gin.IRouter, api RecordingAPI, handler ...gin.HandlerFu
 	}
 }
 
-// listRecordings 分页查询录像列表
-func (a RecordingAPI) listRecordings(c *gin.Context, in *recording.FindRecordingInput) (any, error) {
-	ctx := web.WithContext(c.Request)
-	items, total, err := a.recordingCore.ListRecordings(ctx, in)
-	return gin.H{"items": items, "total": total}, err
+func (a RecordingAPI) getPlayURL(c *gin.Context, in *recording.RangeInput) (*recordingPlayOutput, error) {
+	if in.CID == "" || in.StartMs <= 0 || in.EndMs <= in.StartMs {
+		return nil, reason.ErrBadRequest.Withf("cid, start_ms and end_ms are required")
+	}
+	path := fmt.Sprintf("/recordings/channels/%s/index.m3u8?start_ms=%d&end_ms=%d", url.PathEscape(in.CID), in.StartMs, in.EndMs)
+	if token, ok := c.Get(web.KeyTokenString); ok && token != "" {
+		path += "&token=" + url.QueryEscape(fmt.Sprint(token))
+	}
+	return &recordingPlayOutput{URL: web.WithContext(c.Request).BaseURLJoin(path)}, nil
 }
 
 // getTimeline 获取时间轴数据
@@ -107,16 +109,8 @@ func (a RecordingAPI) getTimeline(c *gin.Context, in *recording.TimelineInput) (
 	return gin.H{"items": items}, err
 }
 
-func (a RecordingAPI) getRecording(c *gin.Context, in *recordingIDInput) (*recording.Recording, error) {
-	return a.recordingCore.GetRecording(c.Request.Context(), in.ID)
-}
-
-func (a RecordingAPI) updateRecording(c *gin.Context, in *updateRecordingInput) (*recording.Recording, error) {
-	return a.recordingCore.UpdateRecording(c.Request.Context(), &in.EditRecordingInput, in.ID)
-}
-
-func (a RecordingAPI) deleteRecording(c *gin.Context, in *recordingIDInput) (*recording.Recording, error) {
-	return a.recordingCore.DeleteRecording(c.Request.Context(), in.ID)
+func (a RecordingAPI) deleteRange(c *gin.Context, in *recording.RangeInput) (*recording.DeleteRangeOutput, error) {
+	return a.recordingCore.DeleteRange(c.Request.Context(), in)
 }
 
 // getMonthlyStats 获取月度录像统计
@@ -124,35 +118,57 @@ func (a RecordingAPI) getMonthlyStats(c *gin.Context, in *recording.MonthlyStats
 	return a.recordingCore.GetMonthlyStats(c.Request.Context(), in)
 }
 
-// downloadRecording 下载录像文件
-func (a RecordingAPI) downloadRecording(c *gin.Context) {
-	recordingID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+func (a RecordingAPI) downloadRange(c *gin.Context) {
+	in := recording.RangeInput{CID: c.Query("cid")}
+	in.StartMs, _ = strconv.ParseInt(c.Query("start_ms"), 10, 64)
+	in.EndMs, _ = strconv.ParseInt(c.Query("end_ms"), 10, 64)
+	if in.CID == "" || in.StartMs <= 0 || in.EndMs <= in.StartMs {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "cid, start_ms and end_ms are required"})
+		return
+	}
+	items, _, err := a.recordingCore.ListRecordings(c.Request.Context(), &recording.FindRecordingInput{CID: in.CID, Page: 1, Size: 10000, StartMs: in.StartMs, EndMs: in.EndMs})
+	if err != nil || len(items) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"code": 1, "msg": "no recordings found in time range"})
+		return
+	}
+	segments := items[:0]
+	for _, item := range items {
+		if strings.EqualFold(filepath.Ext(item.Path), ".m4s") {
+			segments = append(segments, item)
+		}
+	}
+	if len(segments) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"code": 1, "msg": "no HLS-fMP4 recordings found"})
+		return
+	}
+
+	tmpDir, err := os.MkdirTemp("", "owl-recording-export-*")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "msg": "invalid recording id"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "msg": err.Error()})
 		return
 	}
-
-	rec, err := a.recordingCore.GetRecording(c.Request.Context(), recordingID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 1, "msg": err.Error()})
+	defer os.RemoveAll(tmpDir)
+	manifest := filepath.Join(tmpDir, "input.m3u8")
+	output := filepath.Join(tmpDir, fmt.Sprintf("%s-%d-%d.mp4", in.CID, in.StartMs, in.EndMs))
+	if err = os.WriteFile(manifest, []byte(a.generateLocalFMP4Playlist(segments)), 0o600); err != nil {
+		c.JSON(500, gin.H{"code": 1, "msg": err.Error()})
 		return
 	}
-
-	// 构建文件完整路径
-	filePath := a.recordingCore.GetFullPath(rec.Path)
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		c.JSON(http.StatusNotFound, gin.H{"code": 1, "msg": "recording file not found"})
+	ffmpeg := filepath.Join(system.Getwd(), "ffmpeg.exe")
+	if _, statErr := os.Stat(ffmpeg); statErr != nil {
+		ffmpeg = "ffmpeg"
+	}
+	cmd := exec.CommandContext(c.Request.Context(), ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,crypto,data", "-allowed_extensions", "ALL", "-i", manifest, "-map", "0", "-c", "copy", "-movflags", "+faststart", output)
+	if data, runErr := cmd.CombinedOutput(); runErr != nil {
+		slog.ErrorContext(c.Request.Context(), "export recording failed", "err", runErr, "output", string(data))
+		c.JSON(500, gin.H{"code": 1, "msg": "export recording failed"})
 		return
 	}
-
-	// 设置下载文件名
-	fileName := filepath.Base(filePath)
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
-	c.File(filePath)
+	c.FileAttachment(output, filepath.Base(output))
 }
 
 // channelPlaylist 生成 HLS m3u8 播放列表
-// 根据通道 ID 和时间范围，动态生成包含多个 MP4 片段的 m3u8 文件
+// 根据通道 ID 和时间范围聚合原生 fMP4 分片。
 // 路径: /recordings/channels/:cid/index.m3u8?start_ms=xxx&end_ms=xxx&token=xxx
 func (a RecordingAPI) channelPlaylist(c *gin.Context) {
 	cid := c.Param("cid")
@@ -171,8 +187,7 @@ func (a RecordingAPI) channelPlaylist(c *gin.Context) {
 	}
 
 	// 获取时间范围内的录像列表（需要完整路径信息）
-	ctx := web.WithContext(c.Request)
-	recordings, _, err := a.recordingCore.ListRecordings(ctx, &recording.FindRecordingInput{
+	recordings, _, err := a.recordingCore.ListRecordings(c.Request.Context(), &recording.FindRecordingInput{
 		CID:  cid,
 		Page: 1, Size: 10000,
 		StartMs: startMs, EndMs: endMs,
@@ -186,80 +201,127 @@ func (a RecordingAPI) channelPlaylist(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 1, "msg": "no recordings found in time range"})
 		return
 	}
-
-	// 构建请求的 base URL
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
+	segments := recordings[:0]
+	for _, item := range recordings {
+		if strings.EqualFold(filepath.Ext(item.Path), ".m4s") {
+			segments = append(segments, item)
+		}
 	}
-	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
+	if len(segments) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"code": 1, "msg": "no HLS-fMP4 recordings found in time range"})
+		return
+	}
 
-	// 生成 m3u8 内容（带 token）
-	m3u8Content := a.generateM3U8WithToken(recordings, baseURL, token)
+	m3u8Content := a.generateFMP4Playlist(segments, token)
 
 	c.Header("Content-Type", "application/vnd.apple.mpegurl")
 	c.Header("Cache-Control", "no-cache")
 	c.String(http.StatusOK, m3u8Content)
 }
 
-// generateM3U8WithToken 根据录像列表生成 m3u8 播放列表（每个 MP4 URL 带 token）
-func (a RecordingAPI) generateM3U8WithToken(recordings []*recording.Recording, baseURL, token string) string {
-	count := len(recordings)
-	if count == 0 {
+func (a RecordingAPI) generateFMP4Playlist(segments []*recording.Recording, token string) string {
+	if len(segments) == 0 {
 		return ""
 	}
 
-	// 创建媒体播放列表 (winSize=0 表示 VOD，不使用滑动窗口)
-	pl, err := m3u8.NewMediaPlaylist(0, uint(count))
-	if err != nil {
-		return ""
+	sort.Slice(segments, func(i, j int) bool { return segments[i].StartedAt.Before(segments[j].StartedAt.Time) })
+	targetDuration := 1
+	for _, segment := range segments {
+		targetDuration = max(targetDuration, int(math.Ceil(segment.Duration)))
 	}
 
-	// 设置为 VOD 类型
-	pl.MediaType = m3u8.VOD
+	mediaURL := func(relativePath string) string {
+		u := "/static/recordings/" + strings.TrimLeft(filepath.ToSlash(relativePath), "/")
+		if token != "" {
+			u += "?token=" + url.QueryEscape(token)
+		}
+		return u
+	}
 
-	// 录像按时间升序排列
-	sortedRecs := make([]*recording.Recording, len(recordings))
-	copy(sortedRecs, recordings)
-	// 按开始时间升序排序
-	for i := 0; i < len(sortedRecs)-1; i++ {
-		for j := i + 1; j < len(sortedRecs); j++ {
-			if sortedRecs[i].StartedAt.After(sortedRecs[j].StartedAt.Time) {
-				sortedRecs[i], sortedRecs[j] = sortedRecs[j], sortedRecs[i]
+	var out strings.Builder
+	fmt.Fprintf(&out, "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:%d\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n", targetDuration)
+	var previous *recording.Recording
+	previousInit := ""
+	for _, segment := range segments {
+		initPath := a.findInitSegment(segment.Path)
+		newTimeline := previous == nil || initPath != previousInit
+		if previous != nil {
+			expected := previous.EndedAt.Time
+			gap := segment.StartedAt.Sub(expected)
+			// Callback wall-clock values have second precision. Only treat a large
+			// jump as a reset; ordinary rounding must not split a healthy timeline.
+			if gap > 5*time.Second || gap < -5*time.Second {
+				newTimeline = true
 			}
 		}
-	}
-
-	// 添加每个录像片段
-	// URL 格式: /static/recordings/{path}?token=xxx
-	// 使用相对路径（以 / 开头），让浏览器相对于当前域名访问
-	// 这样无论通过代理还是直接访问都能正常工作
-	// ZLM 录制的 fMP4 每个文件 DTS 都从 0 开始，必须在每个片段间添加 DISCONTINUITY
-	// 告诉 HLS.js 重置解码器，避免 DTS 不连续导致的解析错误
-	for i, rec := range sortedRecs {
-		// 每个片段之间都添加 EXT-X-DISCONTINUITY 标签
-		// ZLM 每个录像文件都是独立的 fMP4，DTS 从 0 开始，必须重置解码器
-		if i > 0 {
-			pl.SetDiscontinuity()
+		if previous != nil && newTimeline {
+			out.WriteString("#EXT-X-DISCONTINUITY\n")
 		}
-
-		// 构建相对路径，去掉前导斜杠
-		relativePath := strings.TrimPrefix(rec.Path, "/")
-
-		// 使用相对路径（不带域名），让浏览器根据当前页面域名访问
-		// 这样开发时通过 Vite 代理、生产时通过后端都能正常访问
-		var uri string
-		if token != "" {
-			uri = fmt.Sprintf("/static/recordings/%s?token=%s", relativePath, token)
-		} else {
-			uri = fmt.Sprintf("/static/recordings/%s", relativePath)
+		if newTimeline {
+			fmt.Fprintf(&out, "#EXT-X-MAP:URI=\"%s\"\n", mediaURL(initPath))
 		}
-		_ = pl.Append(uri, rec.Duration, "")
+		fmt.Fprintf(&out, "#EXT-X-PROGRAM-DATE-TIME:%s\n#EXTINF:%.6f,\n%s\n",
+			segment.StartedAt.UTC().Format(time.RFC3339Nano), segment.Duration, mediaURL(segment.Path))
+		previous, previousInit = segment, initPath
 	}
+	out.WriteString("#EXT-X-ENDLIST\n")
+	return out.String()
+}
 
-	// 关闭播放列表，添加 #EXT-X-ENDLIST 标签
-	pl.Close()
+// generateLocalFMP4Playlist builds a temporary FFmpeg input manifest. Each
+// media session keeps its own init segment and discontinuity boundary.
+func (a RecordingAPI) generateLocalFMP4Playlist(segments []*recording.Recording) string {
+	sort.Slice(segments, func(i, j int) bool { return segments[i].StartedAt.Before(segments[j].StartedAt.Time) })
+	targetDuration := 1
+	for _, segment := range segments {
+		targetDuration = max(targetDuration, int(math.Ceil(segment.Duration)))
+	}
+	fileURI := func(path string) string {
+		absolute, _ := filepath.Abs(path)
+		return (&url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(absolute)}).String()
+	}
+	var out strings.Builder
+	fmt.Fprintf(&out, "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:%d\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n", targetDuration)
+	var previous *recording.Recording
+	previousInit := ""
+	for _, segment := range segments {
+		initRelative := a.findInitSegment(segment.Path)
+		newTimeline := previous == nil || initRelative != previousInit
+		if previous != nil {
+			gap := segment.StartedAt.Sub(previous.EndedAt.Time)
+			if gap > 5*time.Second || gap < -5*time.Second {
+				newTimeline = true
+			}
+		}
+		if previous != nil && newTimeline {
+			out.WriteString("#EXT-X-DISCONTINUITY\n")
+		}
+		if newTimeline {
+			fmt.Fprintf(&out, "#EXT-X-MAP:URI=\"%s\"\n", fileURI(a.recordingCore.GetFullPath(initRelative)))
+		}
+		fmt.Fprintf(&out, "#EXTINF:%.6f,\n%s\n", segment.Duration, fileURI(a.recordingCore.GetFullPath(segment.Path)))
+		previous, previousInit = segment, initRelative
+	}
+	out.WriteString("#EXT-X-ENDLIST\n")
+	return out.String()
+}
 
-	// 编码为字符串
-	return pl.String()
+func (a RecordingAPI) findInitSegment(segmentPath string) string {
+	if a.conf == nil || a.conf.Server.Recording.StorageDir == "" {
+		return filepath.ToSlash(filepath.Join(filepath.Dir(segmentPath), "init.mp4"))
+	}
+	full := a.recordingCore.GetFullPath(segmentPath)
+	root := filepath.Clean(a.conf.Server.Recording.StorageDir)
+	for dir := filepath.Dir(full); pathInside(dir, root); dir = filepath.Dir(dir) {
+		candidate := filepath.Join(dir, "init.mp4")
+		if _, err := os.Stat(candidate); err == nil {
+			if relative, err := filepath.Rel(root, candidate); err == nil {
+				return filepath.ToSlash(relative)
+			}
+		}
+		if filepath.Clean(dir) == root {
+			break
+		}
+	}
+	return filepath.ToSlash(filepath.Join(filepath.Dir(segmentPath), "init.mp4"))
 }

@@ -12,7 +12,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/google/wire v0.7.0
 	github.com/gowvp/onvif v0.0.15
-	github.com/grafov/m3u8 v0.12.1
 	github.com/ixugo/goddd v1.8.1
 	github.com/ixugo/netpulse v0.1.5
 	github.com/jinzhu/copier v0.4.0

@@ -43,6 +43,19 @@ type TimelineInput struct {
 	CID string `form:"cid"` // 通道 ID
 }
 
+// RangeInput identifies one channel's recording interval.
+type RangeInput struct {
+	web.DateFilter
+	CID string `form:"cid"` // channel ID
+}
+
+type DeleteRangeOutput struct {
+	Deleted      int   `json:"deleted"`
+	FilesDeleted int   `json:"files_deleted"`
+	FailedFiles  int   `json:"failed_files"`
+	FreedBytes   int64 `json:"freed_bytes"`
+}
+
 // MonthlyStatsInput 月度统计查询参数
 type MonthlyStatsInput struct {
 	CID   string `form:"cid"`   // 通道 ID（可选，不传则查所有通道）

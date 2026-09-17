@@ -37,7 +37,7 @@ func DefaultConfig() Bootstrap {
 				StorageDir:         "./configs/recordings",
 				RetainDays:         3,
 				DiskUsageThreshold: 95.0,
-				SegmentSeconds:     300,
+				HLSFragmentSeconds: 10,
 			},
 		},
 		Data: Data{

@@ -34,8 +34,5 @@ type Driver interface {
 	GetStreamLiveAddr(ctx context.Context, ms *MediaServer, httpPrefix, host, app, stream, token string) StreamLiveAddr
 	GetMediaInfo(ctx context.Context, ms *MediaServer, app, stream string) ([]zlm.MediaItem, error)
 
-	// Recording Operations
-	StartRecord(ctx context.Context, ms *MediaServer, req *zlm.StartRecordRequest) (*zlm.StartRecordResponse, error)
-	StopRecord(ctx context.Context, ms *MediaServer, req *zlm.StopRecordRequest) (*zlm.StopRecordResponse, error)
 	GetMediaList(ctx context.Context, ms *MediaServer) (*zlm.GetMediaListResponse, error)
 }

@@ -28,9 +28,11 @@ type WarpMediaServer struct {
 type NodeManager struct {
 	storer Storer
 
-	drivers      map[string]Driver
-	cacheServers conc.Map[string, *WarpMediaServer]
-	quit         chan struct{}
+	drivers             map[string]Driver
+	cacheServers        conc.Map[string, *WarpMediaServer]
+	quit                chan struct{}
+	recordingStorageDir string
+	hlsFragmentSeconds  int
 }
 
 func NewNodeManager(storer Storer) *NodeManager {
@@ -135,9 +137,13 @@ func setupSecret(bc *conf.Bootstrap) {
 
 func (n *NodeManager) Run(bc *conf.Bootstrap, serverPort int) error {
 	ctx := context.Background()
+	n.recordingStorageDir = bc.Server.Recording.StorageDir
+	n.hlsFragmentSeconds = bc.Server.Recording.HLSFragmentSeconds
 	setupSecret(bc)
 	cfg := bc.Media
 	setValueFn := func(ms *MediaServer) {
+		ms.HLSFragmentSeconds = bc.Server.Recording.HLSFragmentSeconds
+		ms.RecordingStorageDir = bc.Server.Recording.StorageDir
 		ms.ID = DefaultMediaServerID
 		ms.IP = cfg.IP
 		ms.Ports.HTTP = cfg.HTTPPort
@@ -176,6 +182,8 @@ func (n *NodeManager) Run(bc *conf.Bootstrap, serverPort int) error {
 	}
 
 	for _, ms := range mediaServers {
+		ms.HLSFragmentSeconds = bc.Server.Recording.HLSFragmentSeconds
+		ms.RecordingStorageDir = bc.Server.Recording.StorageDir
 		go func(ms *MediaServer) {
 			if err := n.connection(ms, serverPort); err != nil {
 				slog.Error("Connect media server failed", "id", ms.ID, "err", err)
@@ -314,6 +322,8 @@ func (n *NodeManager) CloseStreams(server *MediaServer, in zlm.CloseStreamsReque
 
 // CreateStreamProxy 添加流代理
 func (n *NodeManager) CreateStreamProxy(server *MediaServer, in AddStreamProxyRequest) (*zlm.AddStreamProxyResponse, error) {
+	server.RecordingStorageDir = n.recordingStorageDir
+	server.HLSFragmentSeconds = n.hlsFragmentSeconds
 	driver, err := n.getDriver(server.Type)
 	if err != nil {
 		return nil, err
@@ -344,24 +354,6 @@ func (n *NodeManager) GetMediaInfo(server *MediaServer, app, stream string) ([]z
 		return nil, err
 	}
 	return driver.GetMediaInfo(context.Background(), server, app, stream)
-}
-
-// StartRecord 开始录制指定流
-func (n *NodeManager) StartRecord(server *MediaServer, in zlm.StartRecordRequest) (*zlm.StartRecordResponse, error) {
-	driver, err := n.getDriver(server.Type)
-	if err != nil {
-		return nil, err
-	}
-	return driver.StartRecord(context.Background(), server, &in)
-}
-
-// StopRecord 停止录制指定流
-func (n *NodeManager) StopRecord(server *MediaServer, in zlm.StopRecordRequest) (*zlm.StopRecordResponse, error) {
-	driver, err := n.getDriver(server.Type)
-	if err != nil {
-		return nil, err
-	}
-	return driver.StopRecord(context.Background(), server, &in)
 }
 
 // GetMediaList 批量获取所有在线流列表（含录制状态）

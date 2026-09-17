@@ -88,6 +88,20 @@ func (c Core) DeleteRecording(ctx context.Context, id int64) (*Recording, error)
 	return &out, nil
 }
 
+// DeleteRange deletes all media segments overlapping the requested interval.
+func (c Core) DeleteRange(ctx context.Context, in *RangeInput) (*DeleteRangeOutput, error) {
+	if in.CID == "" || in.StartMs <= 0 || in.EndMs <= in.StartMs {
+		return nil, reason.ErrBadRequest.Withf("cid, start_ms and end_ms are required")
+	}
+	startAt, endAt := in.StartAt(), in.EndAt()
+	total, files, failed, bytes := c.batchDeleteRecordings(ctx, "api", &FindRecordingInput{
+		Page: 1, Size: 1000, CID: in.CID,
+		StartedAtBefore: &endAt, EndedAtAfter: &startAt,
+		OrderBy: "started_at ASC",
+	})
+	return &DeleteRangeOutput{Deleted: total, FilesDeleted: files, FailedFiles: failed, FreedBytes: bytes}, nil
+}
+
 // GetTimeline 获取时间轴数据，返回指定时间范围内的录像时段列表
 func (c Core) GetTimeline(ctx context.Context, in *TimelineInput) ([]TimeRange, error) {
 	if in.CID == "" {

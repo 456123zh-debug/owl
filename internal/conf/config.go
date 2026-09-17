@@ -48,7 +48,7 @@ type ServerRecording struct {
 	StorageDir         string  `comment:"录像存储根目录（相对于工作目录）"`
 	RetainDays         int     `comment:"录像保留天数（超过则清理）"`
 	DiskUsageThreshold float64 `comment:"磁盘使用率阈值（百分比），超过则触发循环覆盖"`
-	SegmentSeconds     int     `comment:"MP4 切片时长（秒）"`
+	HLSFragmentSeconds int     `comment:"HLS-fMP4 目标分片时长（秒）；实际边界跟随源流关键帧"`
 }
 
 type ServerAI struct {

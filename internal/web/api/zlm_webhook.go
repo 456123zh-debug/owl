@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -56,7 +57,7 @@ func registerZLMWebhookAPI(r gin.IRouter, api WebHookAPI, handler ...gin.Handler
 		group.POST("/on_stream_none_reader", web.WrapH(api.onStreamNoneReader))
 		group.POST("/on_rtp_server_timeout", web.WrapH(api.onRTPServerTimeout))
 		group.POST("/on_stream_not_found", web.WrapH(api.onStreamNotFound))
-		group.POST("/on_record_mp4", web.WrapH(api.onRecordMP4))
+		group.POST("/on_record_ts", web.WrapH(api.onRecordTS))
 		// 统一事件接收入口：兼容 Python AI 推送和 gowvp 间转发
 		group.POST("/events", api.onWebhookEvents)
 	}
@@ -97,6 +98,18 @@ func (w WebHookAPI) onServerKeepalive(_ *gin.Context, in *onServerKeepaliveInput
 func (w WebHookAPI) onPublish(c *gin.Context, in *onPublishInput) (*onPublishOutput, error) {
 	ctx := c.Request.Context()
 	w.log.Info("webhook onPublish", "app", in.App, "stream", in.Stream, "schema", in.Schema, "mediaServerID", in.MediaServerID)
+	publishOutput := &onPublishOutput{DefaultOutput: newDefaultOutputOK()}
+	if ch, err := w.ipcCore.GetChannelByAppStreamOrID(ctx, in.App, in.Stream); err == nil {
+		record := !ch.Ext.IsNoneRecord() && !w.conf.Server.Recording.Disabled
+		publishOutput.EnableHlsFmp4 = &record
+		publishOutput.EnableHls = new(false)
+		publishOutput.EnableMp4 = new(false)
+		if record {
+			sessionRoot := filepath.Join(w.conf.Server.Recording.StorageDir,
+				time.Now().Format("2006-01-02"), time.Now().Format("15-04-05.000"))
+			publishOutput.HlsSavePath = &sessionRoot
+		}
+	}
 
 	// 通过 app+stream 查询通道获取类型，支持自定义 app/stream
 	channelType := w.getChannelType(ctx, in.App, in.Stream)
@@ -104,13 +117,13 @@ func (w WebHookAPI) onPublish(c *gin.Context, in *onPublishInput) (*onPublishOut
 	// 获取协议适配器，检查是否实现了 OnPublisher 接口
 	protocol, ok := w.protocols[channelType]
 	if !ok {
-		return &onPublishOutput{DefaultOutput: newDefaultOutputOK()}, nil
+		return publishOutput, nil
 	}
 
 	publisher, ok := protocol.(ipc.OnPublisher)
 	if !ok {
 		// 协议不需要推流鉴权，直接通过
-		return &onPublishOutput{DefaultOutput: newDefaultOutputOK()}, nil
+		return publishOutput, nil
 	}
 
 	// 解析参数
@@ -137,7 +150,7 @@ func (w WebHookAPI) onPublish(c *gin.Context, in *onPublishInput) (*onPublishOut
 		return &onPublishOutput{Code: 1, Msg: "鉴权失败"}, nil
 	}
 
-	return &onPublishOutput{DefaultOutput: newDefaultOutputOK()}, nil
+	return publishOutput, nil
 }
 
 // onStreamChanged rtsp/rtmp 流注册或注销时触发此事件；此事件对回复不敏感。
@@ -154,14 +167,9 @@ func (w WebHookAPI) onStreamChanged(c *gin.Context, in *onStreamChangedInput) (D
 	channelType := w.getChannelType(ctx, app, stream)
 
 	if in.Regist {
-		// 流注册时根据录像模式决定是否启动录制
 		ch, err := w.ipcCore.GetChannelByAppStreamOrID(ctx, app, stream)
 		if err != nil {
-			w.log.WarnContext(ctx, "获取通道信息失败，尝试启动录制", "stream", stream, "err", err)
-			// 找不到通道时仍尝试按旧逻辑启动录制
-			if err := w.recordingCore.StartRecording(ctx, channelType, app, stream); err != nil {
-				w.log.WarnContext(ctx, "启动录制失败", "stream", stream, "err", err)
-			}
+			w.log.WarnContext(ctx, "获取通道信息失败", "stream", stream, "err", err)
 			return newDefaultOutputOK(), nil
 		}
 
@@ -173,24 +181,12 @@ func (w WebHookAPI) onStreamChanged(c *gin.Context, in *onStreamChangedInput) (D
 			}
 		}
 
-		if !ch.Ext.IsNoneRecord() {
-			// always 模式：自动启动录制
-			if err := w.recordingCore.StartRecording(ctx, channelType, app, stream); err != nil {
-				w.log.WarnContext(ctx, "启动录制失败", "stream", stream, "err", err)
-			}
-			w.log.InfoContext(ctx, "自动启动录制（always模式）", "stream", stream)
-		}
 		return newDefaultOutputOK(), nil
 	}
 
 	// RTSP 的派生协议注销不代表源设备离线，只处理 RTSP 主流注销。
 	if channelType == ipc.TypeRTSP && in.Schema != "rtsp" {
 		return newDefaultOutputOK(), nil
-	}
-
-	// 流注销时停止录制
-	if err := w.recordingCore.StopRecording(ctx, app, stream); err != nil {
-		w.log.WarnContext(ctx, "停止录制失败", "stream", stream, "err", err)
 	}
 
 	// 流注销时通过 Protocoler 接口统一处理所有协议的状态更新
@@ -296,12 +292,29 @@ func (w WebHookAPI) onStreamNotFound(c *gin.Context, in *onStreamNotFoundInput) 
 	return newDefaultOutputOK(), nil
 }
 
-// onRecordMP4 录制 mp4 完成后通知事件
-// ZLM 在 MP4 切片完成时会触发此回调，将录像信息入库
-// https://docs.zlmediakit.com/zh/guide/media_server/web_hook_api.html#_8%E3%80%81on-record-mp4
-func (w WebHookAPI) onRecordMP4(c *gin.Context, in *onRecordMP4Input) (DefaultOutput, error) {
+// onRecordTS 在 HLS-fMP4 分片落盘后将其时间和路径写入索引。
+func (w WebHookAPI) onRecordTS(c *gin.Context, in *onRecordTSInput) (DefaultOutput, error) {
 	ctx := c.Request.Context()
-	w.log.InfoContext(ctx, "webhook onRecordMP4",
+	ext := strings.ToLower(filepath.Ext(in.FilePath))
+	if ext != ".mp4" && ext != ".m4s" {
+		return newDefaultOutputOK(), nil
+	}
+	if !pathInside(in.FilePath, w.conf.Server.Recording.StorageDir) {
+		return newDefaultOutputOK(), nil
+	}
+	// This ZLM build always names fMP4 media segments .mp4. Keep that name for
+	// its live manifest and add a same-volume .m4s hard link for OWL VOD. The
+	// two names share disk blocks, so this does not duplicate video data.
+	if ext == ".mp4" {
+		m4sPath := strings.TrimSuffix(in.FilePath, filepath.Ext(in.FilePath)) + ".m4s"
+		if err := os.Link(in.FilePath, m4sPath); err != nil && !os.IsExist(err) {
+			w.log.ErrorContext(ctx, "创建 m4s 硬链接失败", "source", in.FilePath, "link", m4sPath, "err", err)
+			return newDefaultOutputOK(), nil
+		}
+		in.FilePath = m4sPath
+		in.FileName = filepath.Base(m4sPath)
+	}
+	w.log.InfoContext(ctx, "webhook onRecordTS",
 		"app", in.App,
 		"stream", in.Stream,
 		"file_path", in.FilePath,
@@ -350,6 +363,16 @@ func (w WebHookAPI) onRecordMP4(c *gin.Context, in *onRecordMP4Input) (DefaultOu
 	}
 
 	return newDefaultOutputOK(), nil
+}
+
+func pathInside(path, root string) bool {
+	absPath, err1 := filepath.Abs(path)
+	absRoot, err2 := filepath.Abs(root)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // relativeRecordingPath 从 ZLM 回调的绝对路径中截取以存储目录开头的相对路径。

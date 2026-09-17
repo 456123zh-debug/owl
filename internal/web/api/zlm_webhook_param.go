@@ -215,9 +215,8 @@ type onStreamNotFoundInput struct {
 
 }
 
-// onRecordMP4Input 录制 mp4 完成后通知事件参数
-// https://docs.zlmediakit.com/zh/guide/media_server/web_hook_api.html#_8%E3%80%81on-record-mp4
-type onRecordMP4Input struct {
+// onRecordTSInput 是 ZLM HLS TS/fMP4 分片完成事件。启用 fMP4 时文件为 .m4s。
+type onRecordTSInput struct {
 	MediaServerID string  `json:"mediaServerId"` // 服务器 id
 	App           string  `json:"app"`           // 录制的流应用名
 	FileName      string  `json:"file_name"`     // 文件名

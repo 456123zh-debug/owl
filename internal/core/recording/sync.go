@@ -63,11 +63,8 @@ func (c Core) StartRecordingSyncLoop(ctx context.Context) {
 
 // syncRecordingTasks 执行一次录制状态同步
 // 1. 查询所有在线通道（含 RecordMode）
-// 2. 一次 getMediaList 批量获取 ZLM 上所有流的录制状态
-// 3. 三路分类后分别处理：
-//   - needStart:   应录制 + 流在 ZLM 但未录制 → startRecord
-//   - needTrigger: 应录制 + 流不在 ZLM → 快照拉流
-//   - needStop:    不应录制 + 正在录制 → stopRecord
+// 2. 一次 getMediaList 批量获取 ZLM 上所有源流
+// 3. 对应录制但尚无源流的通道触发拉流。持久化参数在 on_publish 决定。
 func (c Core) syncRecordingTasks(ctx context.Context) {
 	allChannels, err := c.ipcProvider.ListOnlineChannels(ctx)
 	if err != nil {
@@ -86,7 +83,7 @@ func (c Core) syncRecordingTasks(ctx context.Context) {
 		return
 	}
 
-	var needStart, needTrigger, needStop []ChannelInfo
+	var needTrigger []ChannelInfo
 	var skipped int
 
 	for _, ch := range allChannels {
@@ -96,40 +93,13 @@ func (c Core) syncRecordingTasks(ctx context.Context) {
 		}
 
 		key := ch.App + "/" + ch.Stream
-		isRecording, streamExists := recordingMap[key]
+		_, streamExists := recordingMap[key]
 		shouldRecord := ch.RecordMode != "none"
 
-		switch {
-		case !shouldRecord && isRecording:
-			needStop = append(needStop, ch)
-		case shouldRecord && isRecording:
-			skipped++
-		case shouldRecord && streamExists:
-			needStart = append(needStart, ch)
-		case shouldRecord && !streamExists:
+		if shouldRecord && !streamExists {
 			needTrigger = append(needTrigger, ch)
-		default:
+		} else {
 			skipped++
-		}
-	}
-
-	var synced int
-	for _, ch := range needStart {
-		if err := c.StartRecording(ctx, ch.Type, ch.App, ch.Stream); err != nil {
-			slog.WarnContext(ctx, "sync: startRecord 失败",
-				"channel", ch.ID, "app", ch.App, "stream", ch.Stream, "err", err)
-		} else {
-			synced++
-		}
-	}
-
-	var stopped int
-	for _, ch := range needStop {
-		if err := c.smsProvider.StopRecord(ch.App, ch.Stream); err != nil {
-			slog.WarnContext(ctx, "sync: stopRecord 失败",
-				"channel", ch.ID, "app", ch.App, "stream", ch.Stream, "err", err)
-		} else {
-			stopped++
 		}
 	}
 
@@ -137,9 +107,7 @@ func (c Core) syncRecordingTasks(ctx context.Context) {
 
 	slog.Info("sync: 录制同步完成",
 		"total", len(allChannels),
-		"synced", synced,
 		"skipped", skipped,
-		"stopped", stopped,
 		"triggered", triggered,
 	)
 }

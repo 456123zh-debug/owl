@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gowvp/owl/internal/notify"
@@ -183,10 +184,7 @@ func (c Core) cleanupByDiskUsage() bool {
 		var details []diskDeleteDetail
 
 		for _, rec := range oldestRecordings {
-			filePath := rec.Path
-			if !filepath.IsAbs(filePath) {
-				filePath = filepath.Join(system.Getwd(), filePath)
-			}
+			filePath := c.GetFullPath(rec.Path)
 			if err := os.Remove(filePath); err != nil {
 				if os.IsNotExist(err) {
 					deleteIDs = append(deleteIDs, rec.ID)
@@ -198,6 +196,10 @@ func (c Core) cleanupByDiskUsage() bool {
 					slog.Warn("文件删除失败，跳过", "path", filePath, "err", err)
 				}
 			} else {
+				if strings.EqualFold(filepath.Ext(filePath), ".m4s") {
+					_ = os.Remove(strings.TrimSuffix(filePath, filepath.Ext(filePath)) + ".mp4")
+				}
+				cleanupHLSSession(filepath.Dir(filePath))
 				batchFreed += rec.Size
 				deleteIDs = append(deleteIDs, rec.ID)
 				fileNames = append(fileNames, filepath.Base(filePath))
@@ -342,10 +344,7 @@ func (c Core) batchDeleteRecordings(ctx context.Context, reason string, filter *
 		var details []deleteDetail
 
 		for _, rec := range recordings {
-			filePath := rec.Path
-			if !filepath.IsAbs(filePath) {
-				filePath = filepath.Join(system.Getwd(), filePath)
-			}
+			filePath := c.GetFullPath(rec.Path)
 			if err := os.Remove(filePath); err != nil {
 				if os.IsNotExist(err) {
 					deleteIDs = append(deleteIDs, rec.ID)
@@ -357,6 +356,10 @@ func (c Core) batchDeleteRecordings(ctx context.Context, reason string, filter *
 					slog.Warn("文件删除失败，跳过", "path", filePath, "err", err)
 				}
 			} else {
+				if strings.EqualFold(filepath.Ext(filePath), ".m4s") {
+					_ = os.Remove(strings.TrimSuffix(filePath, filepath.Ext(filePath)) + ".mp4")
+				}
+				cleanupHLSSession(filepath.Dir(filePath))
 				batchFilesDeleted++
 				batchFreed += rec.Size
 				deleteIDs = append(deleteIDs, rec.ID)
@@ -385,10 +388,14 @@ func (c Core) batchDeleteRecordings(ctx context.Context, reason string, filter *
 				totalDeleted += len(deleteIDs)
 			}
 		}
-
 		filesDeleted += batchFilesDeleted
 		failedFiles += batchFailed
 		freedBytes += batchFreed
+		// Failed records remain queryable. Retrying the same page would loop forever
+		// and count the same failures repeatedly.
+		if len(deleteIDs) == 0 || batchFailed > 0 {
+			break
+		}
 	}
 
 	// 清理空目录
@@ -398,6 +405,23 @@ func (c Core) batchDeleteRecordings(ctx context.Context, reason string, filter *
 	}
 
 	return
+}
+
+// cleanupHLSSession removes the init segment and manifests after the final media
+// segment in a completed session has been deleted.
+func cleanupHLSSession(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".m4s") {
+			return
+		}
+	}
+	for _, name := range []string{"init.mp4", "hls.m3u8", "hls.fmp4.m3u8", "vod.m3u8"} {
+		_ = os.Remove(filepath.Join(dir, name))
+	}
 }
 
 // getAbsStorageDir 返回录像存储目录的绝对路径

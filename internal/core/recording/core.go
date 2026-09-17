@@ -18,10 +18,7 @@ type Storer interface {
 
 // SMSProvider 流媒体服务提供者接口，解耦录制领域与 sms 领域
 type SMSProvider interface {
-	StartRecord(app, stream, customPath string, maxSecond int) error
-	StopRecord(app, stream string) error
-	// ListRecordingStreams 批量获取所有在线流的录制状态
-	// 返回 map[app/stream]bool，true 表示正在录制 MP4
+	// Persistence is selected in on_publish; this reports source stream presence.
 	ListRecordingStreams() (map[string]bool, error)
 }
 

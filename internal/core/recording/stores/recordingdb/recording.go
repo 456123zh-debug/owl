@@ -37,7 +37,7 @@ func (d Recording) applyFilters(db *gorm.DB, in *recording.FindRecordingInput) *
 		db = db.Where("stream = ?", in.Stream)
 	}
 	if in.StartMs > 0 && in.EndMs > 0 {
-		db = db.Where("started_at >= ? AND ended_at <= ?", in.StartAt(), in.EndAt())
+		db = db.Where("started_at < ? AND ended_at > ?", in.EndAt(), in.StartAt())
 	}
 	if in.StartedAtBefore != nil {
 		db = db.Where("started_at < ?", orm.Time{Time: *in.StartedAtBefore})

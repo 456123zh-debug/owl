@@ -45,3 +45,4 @@ graphify-out/
 .CLAUDE.local.md
 fflogs/
 ffmpeg.exe
+dist/

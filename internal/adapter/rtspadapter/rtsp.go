@@ -158,10 +158,11 @@ func (a *Adapter) OnStreamNotFound(ctx context.Context, app string, stream strin
 		return err
 	}
 	resp, err := a.smsCore.CreateStreamProxy(svr, sms.AddStreamProxyRequest{
-		App:     ch.App,
-		Stream:  ch.Stream,
-		URL:     ch.Config.SourceURL,
-		RTPType: ch.Config.Transport,
+		App:        ch.App,
+		Stream:     ch.Stream,
+		URL:        ch.Config.SourceURL,
+		RTPType:    ch.Config.Transport,
+		PersistHLS: !ch.Ext.IsNoneRecord(),
 	})
 	if err != nil {
 		return err

@@ -10,6 +10,7 @@ const arr = (items) => ({ type: "array", items });
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
 const response = (schema, description = "成功") => ({ description, content: { "application/json": { schema } } });
 const binResponse = (contentType, description = "二进制内容") => ({ description, content: { [contentType]: { schema: { type: "string", format: "binary" } } } });
+const mediaResponse = (content, description) => ({ description, content });
 const body = (schema, required = false) => ({ required, content: { "application/json": { schema } } });
 const p = (name, in_, schema, required = false, description = "") => ({ name, in: in_, required, schema, ...(description ? { description } : {}) });
 const pagers = [
@@ -44,8 +45,10 @@ S.PlayOutput = obj({ app: str(), stream: str(), items: arr(obj({ type: str(), ur
 S.SnapshotLink = obj({ link: str() });
 S.RecordMode = obj({ id: str(), record_mode: str() });
 S.PTZ = obj({ action: str("continuous、stop、absolute、relative、preset"), direction: str(), speed: num(), x: num(), y: num(), zoom: num(), preset_id: str(), preset_op: str("goto、set、remove") });
-S.Recording = obj({ id: int(), cid: str(), app: str(), stream: str(), started_at: { type: "string", format: "date-time" }, ended_at: { type: "string", format: "date-time" }, duration: num(), path: str(), size: int(), object_count: int("int32"), delete_flag: bool(), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } });
-S.MonthlyStats = obj({ year: int("int32"), month: int("int32"), days: int("int32"), has_video: str() });
+S.Recording = obj({ id: int("int64", "fMP4 媒体分片记录 ID"), cid: str("通道 ID"), app: str("流应用名"), stream: str("流名称"), started_at: { type: "string", format: "date-time", description: "分片开始时间" }, ended_at: { type: "string", format: "date-time", description: "分片结束时间" }, duration: num("按源流关键帧/GOP 对齐的实际时长（秒）"), path: str(".m4s 分片的相对路径或静态访问地址"), size: int("int64", "fMP4 媒体分片大小（字节）"), object_count: int("int32", "分片内检测对象数量"), delete_flag: bool("是否已标记删除"), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } });
+S.RecordingPlay = obj({ url: { type: "string", format: "uri", description: "带鉴权参数的 HLS-fMP4 播放地址", example: "http://localhost:19123/recordings/channels/spjr0ms/index.m3u8?start_ms=1789650000000&end_ms=1789653600000&token=Bearer%20eyJ..." } }, ["url"]);
+S.DeleteRecordings = obj({ deleted: { ...int("int32", "删除的数据库分片数"), example: 360 }, files_deleted: { ...int("int32", "删除的媒体分片数"), example: 360 }, failed_files: { ...int("int32", "删除失败的文件数"), example: 0 }, freed_bytes: { ...int("int64", "释放的磁盘字节数"), example: 524288000 } });
+S.MonthlyStats = obj({ year: { ...int("int32"), example: 2026 }, month: { ...int("int32"), example: 9 }, days: { ...int("int32"), example: 30 }, has_video: { ...str("从第 1 天开始的录像日期位图，1 表示当天有录像"), example: "000000000000000011000000000000" } });
 S.Event = obj({ id: int(), did: str(), cid: str(), started_at: { type: "string", format: "date-time" }, ended_at: { type: "string", format: "date-time" }, label: str(), score: num(), zones: str(), image_path: str(), model: str(), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } });
 S.StreamPush = obj({ id: str(), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" }, name: str(), pushed_at: { type: "string", format: "date-time", nullable: true }, stopped_at: { type: "string", format: "date-time", nullable: true }, app: str(), stream: str(), media_server_id: str(), server_id: str(), status: str(), is_auth_disabled: bool(), push_addrs: arr(str()) });
 S.StreamProxy = obj({ id: str(), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" }, app: str(), stream: str(), media_server_id: str(), source_url: str(), timeout_s: int("int32"), transport: int("int32"), enabled: bool(), enabled_audio: bool(), enabled_remove_none_reader: bool(), enabled_disabled_none_reader: bool(), stream_key: str(), pulling: bool() });
@@ -66,7 +69,7 @@ S.ZLMStreamChanged = obj({ regist: bool(), aliveSecond: int("int32"), app: str()
 S.ZLMPublish = obj({ mediaServerId: str(), app: str(), id: str(), ip: str(), params: str(), port: int("int32"), schema: str(), stream: str(), vhost: str() });
 S.ZLMNoneReader = obj({ app: str(), schema: str(), stream: str(), vhost: str(), mediaServerId: str() });
 S.ZLMRTPTimeout = obj({ local_port: int("int32"), re_use_port: bool(), ssrc: int("int64"), stream_id: str(), tcp_mode: int("int32"), mediaServerId: str() });
-S.ZLMRecordMP4 = obj({ mediaServerId: str(), app: str(), file_name: str(), file_path: str(), file_size: int(), folder: str(), start_time: int(), stream: str(), time_len: num(), url: str(), vhost: str() });
+S.ZLMRecordTS = obj({ mediaServerId: str(), app: str(), file_name: str("ZLM 生成的 fMP4 分片文件名"), file_path: str("ZLM 生成的 fMP4 分片绝对路径"), file_size: int("int64", "分片字节数"), folder: str(), start_time: int("int64", "分片开始时间戳"), stream: str(), time_len: num("按源流关键帧/GOP 对齐的实际时长（秒）"), url: str(), vhost: str() });
 
 const page = (item) => obj({ items: arr(item), total: int() });
 const schemas = Object.fromEntries(Object.entries(S).map(([k, v]) => [k, v]));
@@ -78,7 +81,7 @@ schemas.StreamPushList = page(ref("StreamPush"));
 schemas.StreamProxyList = page(ref("StreamProxy"));
 schemas.MediaServerList = page(ref("MediaServer"));
 schemas.ZoneList = obj({ items: arr(ref("Zone")) });
-schemas.Timeline = obj({ items: arr(obj({ start_ms: int(), end_ms: int(), count: int("int32") })) });
+schemas.Timeline = obj({ items: arr(obj({ id: { ...int("int64", "录像分片记录 ID"), example: 128 }, start_ms: { ...int("int64", "分片开始时间戳（毫秒）"), example: 1789652838000 }, end_ms: { ...int("int64", "分片结束时间戳（毫秒）"), example: 1789652848000 }, duration: { ...num("实际时长（秒）"), example: 10.002 }, object_count: { ...int("int32", "检测对象数量"), example: 0 }, delete_flag: { ...bool("是否已标记删除"), example: false } })) }, ["items"]);
 schemas.Stat = obj({ mem: obj({}), cpu: obj({}), disk: arr(obj({ name: str(), used: int(), total: int() })), net: obj({}) });
 schemas.Profiles = obj({ count: int("int32"), profiles: arr(obj({})) });
 schemas.Version = obj({ version: str(), remark: str() });
@@ -151,15 +154,16 @@ add("/channels/{id}/ai/disable", "post", "禁用 AI 检测", pathId(), obj({ ena
 add("/channels/{id}/record_mode", "post", "设置录像模式", merge(pathId(), json(obj({ mode: str("always、ai、none") }), true)), ref("RecordMode"), true);
 add("/channels/{id}/ptz/control", "post", "云台控制", merge(pathId(), json(ref("PTZ"), true)), ref("Msg"), true);
 add("/channels/{id}/media_info", "get", "获取流媒体信息", pathId(), ref("MediaInfo"), true);
-add("/recordings", "get", "录像列表", query(...pagers, p("cid", "query", str()), p("app", "query", str()), p("stream", "query", str()), p("start_ms", "query", int()), p("end_ms", "query", int())), ref("RecordingList"), true);
-add("/recordings/timeline", "get", "录像时间轴", query(p("cid", "query", str()), p("start_ms", "query", int()), p("end_ms", "query", int())), ref("Timeline"), true);
-add("/recordings/monthly", "get", "月度录像统计", query(p("cid", "query", str()), p("year", "query", int("int32")), p("month", "query", int("int32"))), ref("MonthlyStats"), true);
-add("/recordings/{id}", "get", "录像详情", pathId("id", int()), ref("Recording"), true);
-add("/recordings/{id}", "put", "更新录像", merge(pathId("id", int()), json(obj({ object_count: int("int32") }))), ref("Recording"), true);
-add("/recordings/{id}", "delete", "删除录像", pathId("id", int()), ref("Recording"), true);
-add("/recordings/{id}/download", "get", "下载录像文件", pathId("id", int()), binResponse("video/mp4"), true);
-add("/recordings/channels/{cid}/index.m3u8", "get", "获取录像 HLS 播放列表", merge(pathId("cid"), query(p("start_ms", "query", int(), true), p("end_ms", "query", int(), true), p("token", "query", str()))), { type: "string" }, true);
-add("/static/recordings/{path}", "get", "访问录像静态文件", { parameters: [p("path", "path", str(), true), p("token", "query", str())] }, binResponse("video/mp4"), true);
+const recordingRange = () => query(
+  p("cid", "query", { ...str("通道 ID"), example: "spjr0ms" }, true),
+  p("start_ms", "query", { ...int("int64", "开始时间戳（毫秒）"), example: 1789650000000 }, true),
+  p("end_ms", "query", { ...int("int64", "结束时间戳（毫秒）"), example: 1789653600000 }, true),
+);
+add("/recordings/play", "get", "查询录像播放地址", recordingRange(), ref("RecordingPlay"), true);
+add("/recordings/timeline", "get", "查询录像时间轴", recordingRange(), ref("Timeline"), true);
+add("/recordings/monthly", "get", "查询月份录像日期", query(p("cid", "query", { ...str("通道 ID"), example: "spjr0ms" }, true), p("year", "query", { ...int("int32"), example: 2026 }, true), p("month", "query", { ...int("int32"), example: 9 }, true)), ref("MonthlyStats"), true);
+add("/recordings", "delete", "删除时间范围内的录像", recordingRange(), ref("DeleteRecordings"), true);
+add("/recordings/download", "get", "下载时间范围内的录像", recordingRange(), mediaResponse({ "video/mp4": { schema: { type: "string", format: "binary" }, example: "（MP4 二进制文件，保留原始 H.264/H.265 编码）" } }, "将范围内的 HLS-fMP4 分片无转码封装为一个 MP4 文件后下载"), true);
 add("/media_servers", "get", "流媒体服务器列表", query(...pagers, p("ip", "query", str()), p("type", "query", str()), p("status", "query", bool())), ref("MediaServerList"), true);
 add("/media_servers/{id}", "put", "更新流媒体服务器", merge(pathId(), json(obj({ ip: str(), hook_ip: str(), sdp_ip: str(), secret: str(), type: str() }))), ref("MediaServer"), true);
 add("/configs/info", "get", "获取系统配置摘要", {}, ref("ConfigInfo"), true);
@@ -182,8 +186,8 @@ for (const [path, schema, summary] of [
   ["/webhook/on_stream_none_reader", "DefaultOutput", "ZLM 无人观看回调"],
   ["/webhook/on_rtp_server_timeout", "DefaultOutput", "ZLM RTP 超时回调"],
   ["/webhook/on_stream_not_found", "DefaultOutput", "ZLM 流不存在回调"],
-  ["/webhook/on_record_mp4", "DefaultOutput", "ZLM MP4 录制回调"],
-]) add(path, "post", summary, json(ref(path.includes("stream_changed") ? "ZLMStreamChanged" : path.includes("publish") || path.includes("play") ? "ZLMPublish" : path.includes("none_reader") ? "ZLMNoneReader" : path.includes("rtp_server") ? "ZLMRTPTimeout" : path.includes("record_mp4") ? "ZLMRecordMP4" : "DefaultOutput")), ref(schema));
+  ["/webhook/on_record_ts", "DefaultOutput", "ZLM HLS-fMP4 分片完成回调"],
+]) add(path, "post", summary, json(ref(path.includes("stream_changed") ? "ZLMStreamChanged" : path.includes("publish") || path.includes("play") ? "ZLMPublish" : path.includes("none_reader") ? "ZLMNoneReader" : path.includes("rtp_server") ? "ZLMRTPTimeout" : path.includes("record_ts") ? "ZLMRecordTS" : "DefaultOutput")), ref(schema));
 add("/webhook/events", "post", "接收告警事件", json(ref("WebhookForward"), true), ref("DefaultOutput"));
 add("/ai/keepalive", "post", "AI 服务心跳", json(ref("AIKeepalive")), ref("AIWebhookOutput"));
 add("/ai/started", "post", "AI 服务启动通知", json(ref("AIStarted")), ref("AIWebhookOutput"));

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -107,6 +109,10 @@ func (d *ZLMDriver) Connect(ctx context.Context, ms *MediaServer) error {
 
 func (d *ZLMDriver) Setup(ctx context.Context, ms *MediaServer, webhookURL string) error {
 	engine := d.withConfig(ms)
+	fragmentSeconds := ms.HLSFragmentSeconds
+	if fragmentSeconds <= 0 {
+		fragmentSeconds = 2
+	}
 
 	// 拼接 IP 但是不要空格
 	ips := make([]string, 0, 2)
@@ -149,8 +155,8 @@ func (d *ZLMDriver) Setup(ctx context.Context, ms *MediaServer, webhookURL strin
 		HookOnStreamNoneReader:         new(fmt.Sprintf("%s/on_stream_none_reader", webhookURL)),
 		GeneralStreamNoneReaderDelayMS: new("30000"),
 		HookOnStreamNotFound:           new(fmt.Sprintf("%s/on_stream_not_found", webhookURL)),
-		HookOnRecordTs:                 new(""),
-		HookOnRecordMp4:                new(fmt.Sprintf("%s/on_record_mp4", webhookURL)),
+		HookOnRecordTs:                 new(fmt.Sprintf("%s/on_record_ts", webhookURL)),
+		HookOnRecordMp4:                new(""),
 		HookOnRtspAuth:                 new(""),
 		HookOnRtspRealm:                new(""),
 		HookOnShellLogin:               new(""),
@@ -175,12 +181,15 @@ func (d *ZLMDriver) Setup(ctx context.Context, ms *MediaServer, webhookURL strin
 		GeneralUnreadyFrameCache: new("50"),
 		GeneralMergeWriteMS:      new("100"),
 		GeneralListenIP:          new("0.0.0.0"),
+		HlsBroadcastRecordTs:     new("1"),
+		HlsSegDur:                new(strconv.Itoa(fragmentSeconds)),
+		HlsFastRegister:          new("0"),
+		HlsSegKeep:               new("1"),
 
-		// 录像配置
-		// 移除默认的 "record" 目录层级，简化路径结构
+		// 禁用旧 MP4 录像；录像统一由 HLS-fMP4 muxer 生成。
 		RecordAppName:    new(""),
-		RecordFastStart:  new("1"), // moov 写在开头，便于流式播放
-		RecordEnableFmp4: new("0"), // 启用 fMP4 格式，HLS.js 可直接播放
+		RecordFastStart:  new("0"),
+		RecordEnableFmp4: new("0"),
 	}
 	if rtcPort != "" {
 		req.RtcPort = &rtcPort
@@ -269,6 +278,15 @@ func (d *ZLMDriver) CloseStreams(ctx context.Context, ms *MediaServer, req *zlm.
 
 func (d *ZLMDriver) AddStreamProxy(ctx context.Context, ms *MediaServer, req *AddStreamProxyRequest) (*zlm.AddStreamProxyResponse, error) {
 	engine := d.withConfig(ms)
+	enableHLS := req.PersistHLS
+	var hlsSavePath *string
+	if req.PersistHLS {
+		path := filepath.Join(ms.RecordingStorageDir, time.Now().Format("2006-01-02"), time.Now().Format("15-04-05.000"))
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return nil, fmt.Errorf("create HLS recording directory: %w", err)
+		}
+		hlsSavePath = &path
+	}
 	return engine.AddStreamProxy(zlm.AddStreamProxyRequest{
 		Vhost:         "__defaultVhost__",
 		App:           req.App,
@@ -277,7 +295,8 @@ func (d *ZLMDriver) AddStreamProxy(ctx context.Context, ms *MediaServer, req *Ad
 		RTPType:       req.RTPType,
 		RetryCount:    3,
 		TimeoutSec:    pullTimeoutMS / 1000,
-		EnableHLSFMP4: new(true),
+		EnableHLSFMP4: &enableHLS,
+		HLSSavePath:   hlsSavePath,
 		EnableAudio:   new(true),
 		EnableRTSP:    new(true),
 		EnableRTMP:    new(true),
@@ -305,18 +324,6 @@ func (d *ZLMDriver) GetMediaInfo(ctx context.Context, ms *MediaServer, app, stre
 		return nil, err
 	}
 	return resp.Data, nil
-}
-
-// StartRecord 开始录制，通知 ZLM 对指定流进行 MP4 录制
-func (d *ZLMDriver) StartRecord(ctx context.Context, ms *MediaServer, req *zlm.StartRecordRequest) (*zlm.StartRecordResponse, error) {
-	engine := d.withConfig(ms)
-	return engine.StartRecord(*req)
-}
-
-// StopRecord 停止录制
-func (d *ZLMDriver) StopRecord(ctx context.Context, ms *MediaServer, req *zlm.StopRecordRequest) (*zlm.StopRecordResponse, error) {
-	engine := d.withConfig(ms)
-	return engine.StopRecord(*req)
 }
 
 // GetMediaList 批量获取所有在线流列表（含录制状态）

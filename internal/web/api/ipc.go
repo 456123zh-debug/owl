@@ -696,6 +696,7 @@ func (a IPCAPI) refreshSnapshot(c *gin.Context, in *refreshSnapshotWithIDInput) 
 	if temporaryProxy && ch.IsRTSP() {
 		if _, err := a.uc.SMSAPI.smsCore.CreateStreamProxy(svr, sms.AddStreamProxyRequest{
 			App: ch.GetApp(), Stream: ch.GetStream(), URL: ch.Config.SourceURL, RTPType: ch.Config.Transport,
+			PersistHLS: !ch.Ext.IsNoneRecord(),
 		}); err != nil {
 			return nil, err
 		}
@@ -969,22 +970,8 @@ func (a IPCAPI) setRecordMode(c *gin.Context, in *setRecordModeWithIDInput) (gin
 		return nil, err
 	}
 
-	// 根据录像模式控制 ZLM 录制：
-	// - always/ai: 如果流在线则启动录制
-	// - none: 停止录制
-	if channel.Ext.IsNoneRecord() {
-		// none 模式：停止录制
-		if err := a.recordingCore.StopRecording(ctx, channel.GetApp(), channel.GetStream()); err != nil {
-			slog.WarnContext(ctx, "停止录制失败", "channel", channelID, "err", err)
-		}
-	} else {
-		// always/ai 模式：如果流在线则启动录制
-		if channel.IsOnline {
-			if err := a.recordingCore.StartRecording(ctx, channel.GetType(), channel.GetApp(), channel.GetStream()); err != nil {
-				slog.WarnContext(ctx, "启动录制失败", "channel", channelID, "err", err)
-			}
-		}
-	}
+	// HLS-fMP4 是否持久化在下一次源流发布时由 on_publish 决定。当前流
+	// 的 muxer 不支持无损热切换，避免在这里再次启动旧 MP4/TS 录像器。
 
 	return gin.H{
 		"id":          channel.ID,

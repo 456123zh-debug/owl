@@ -55,8 +55,8 @@
     RetainDays = 3
     # 磁盘使用率阈值（百分比），超过则触发循环覆盖
     DiskUsageThreshold = 98.0
-    # MP4 切片时长（秒）
-    SegmentSeconds = 10
+    # HLS-fMP4 目标分片时长（秒）；实际分片边界跟随源流关键帧/GOP
+    HLSFragmentSeconds = 10
 
   [Server.Webhook]
     # 推送目标 URL 数组，secret 内嵌于 URL query 参数（如 http://host/webhook/events?secret=xxx）

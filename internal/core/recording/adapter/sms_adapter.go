@@ -3,7 +3,6 @@ package adapter
 import (
 	"github.com/gowvp/owl/internal/core/recording"
 	"github.com/gowvp/owl/internal/core/sms"
-	"github.com/gowvp/owl/pkg/zlm"
 )
 
 var _ recording.SMSProvider = (*SMSAdapter)(nil)
@@ -20,40 +19,8 @@ func NewSMSAdapter(smsCore sms.Core) recording.SMSProvider {
 	return &SMSAdapter{smsCore: smsCore}
 }
 
-// StartRecord 启动录制
-func (a *SMSAdapter) StartRecord(app, stream, customPath string, maxSecond int) error {
-	ms, err := a.smsCore.GetDefaultMediaServer()
-	if err != nil {
-		return err
-	}
-	_, err = a.smsCore.StartRecord(ms, zlm.StartRecordRequest{
-		Type:       1, // MP4
-		Vhost:      "__defaultVhost__",
-		App:        app,
-		Stream:     stream,
-		CustomPath: customPath,
-		MaxSecond:  maxSecond,
-	})
-	return err
-}
-
-// StopRecord 停止录制
-func (a *SMSAdapter) StopRecord(app, stream string) error {
-	ms, err := a.smsCore.GetDefaultMediaServer()
-	if err != nil {
-		return err
-	}
-	_, err = a.smsCore.StopRecord(ms, zlm.StopRecordRequest{
-		Type:   1, // MP4
-		Vhost:  "__defaultVhost__",
-		App:    app,
-		Stream: stream,
-	})
-	return err
-}
-
 // ListRecordingStreams 批量获取所有在线流的录制状态
-// 调用 ZLM getMediaList 一次获取全部流，提取 isRecordingMP4 状态
+// 调用 ZLM getMediaList 一次获取全部流，提取 isRecordingHLS 状态
 // 返回 map key 格式为 "app/stream"
 func (a *SMSAdapter) ListRecordingStreams() (map[string]bool, error) {
 	ms, err := a.smsCore.GetDefaultMediaServer()
@@ -67,7 +34,7 @@ func (a *SMSAdapter) ListRecordingStreams() (map[string]bool, error) {
 	result := make(map[string]bool, len(resp.Data))
 	for _, item := range resp.Data {
 		key := item.App + "/" + item.Stream
-		if item.IsRecordingMP4 {
+		if item.IsRecordingHLS {
 			result[key] = true
 		} else if _, exists := result[key]; !exists {
 			result[key] = false
