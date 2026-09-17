@@ -280,7 +280,8 @@ func (d *ZLMDriver) AddStreamProxy(ctx context.Context, ms *MediaServer, req *Ad
 		EnableRTSP:    new(true),
 		EnableRTMP:    new(true),
 		AddMuteAudio:  new(true),
-		AutoClose:     new(true),
+		// RTSP 通道需要持续拉流，才能准确反映设备在线状态，并允许随时抓图。
+		AutoClose: new(false),
 	})
 }
 

@@ -170,6 +170,14 @@ func (w WebHookAPI) onStreamChanged(c *gin.Context, in *onStreamChangedInput) (D
 			return newDefaultOutputOK(), nil
 		}
 
+		// 派生的 RTMP/HLS 流会分别注册和注销，不能用它们覆盖源流状态。
+		// RTSP 主流注册成功才表示拉流代理已经真正连通设备。
+		if ch.IsRTSP() && in.Schema == "rtsp" {
+			if _, err := w.ipcCore.UpdateChannelConfigAndOnline(ctx, ch.ID, true, func(*ipc.StreamConfig) {}); err != nil {
+				w.log.WarnContext(ctx, "更新 RTSP 通道在线状态失败", "stream", stream, "err", err)
+			}
+		}
+
 		if !ch.Ext.IsNoneRecord() {
 			// always 模式：自动启动录制
 			if err := w.recordingCore.StartRecording(ctx, channelType, app, stream); err != nil {
@@ -177,6 +185,11 @@ func (w WebHookAPI) onStreamChanged(c *gin.Context, in *onStreamChangedInput) (D
 			}
 			w.log.InfoContext(ctx, "自动启动录制（always模式）", "stream", stream)
 		}
+		return newDefaultOutputOK(), nil
+	}
+
+	// RTSP 的派生协议注销不代表源设备离线，只处理 RTSP 主流注销。
+	if channelType == ipc.TypeRTSP && in.Schema != "rtsp" {
 		return newDefaultOutputOK(), nil
 	}
 

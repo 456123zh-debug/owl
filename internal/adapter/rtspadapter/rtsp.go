@@ -1,11 +1,19 @@
 package rtspadapter
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/gowvp/owl/internal/core/ipc"
 	"github.com/gowvp/owl/internal/core/sms"
+	"github.com/ixugo/goddd/pkg/web"
 )
 
 var _ ipc.Protocoler = (*Adapter)(nil)
@@ -23,10 +31,97 @@ func (a *Adapter) DeleteDevice(ctx context.Context, device *ipc.Device) error {
 }
 
 func NewAdapter(ipcCore ipc.Core, smsCore sms.Core) *Adapter {
-	return &Adapter{
+	a := &Adapter{
 		ipcCore: ipcCore,
 		smsCore: smsCore,
 	}
+	go a.runHealthChecks()
+	return a
+}
+
+const (
+	healthCheckInterval = 30 * time.Second
+	healthCheckTimeout  = 3 * time.Second
+	offlineThreshold    = 3
+)
+
+// runHealthChecks 使用轻量 RTSP OPTIONS 独立维护设备在线状态。
+// 播放代理是否存在不再等同于设备是否在线。
+func (a *Adapter) runHealthChecks() {
+	failures := make(map[string]int)
+	check := func() {
+		channels, _, err := a.ipcCore.ListChannels(context.Background(), &ipc.FindChannelInput{
+			PagerFilter: web.NewPagerFilterMaxSize(),
+			Type:        ipc.TypeRTSP,
+		})
+		if err != nil {
+			slog.Warn("RTSP 在线探测查询通道失败", "err", err)
+			return
+		}
+
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 10)
+		var mu sync.Mutex
+		for _, ch := range channels {
+			ch := ch
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				online := probeRTSP(ch.Config.SourceURL)
+				mu.Lock()
+				if online {
+					failures[ch.ID] = 0
+				} else {
+					failures[ch.ID]++
+				}
+				failed := failures[ch.ID]
+				mu.Unlock()
+
+				wantOnline := online || failed < offlineThreshold && ch.IsOnline
+				if wantOnline == ch.IsOnline {
+					return
+				}
+				if _, err := a.ipcCore.UpdateChannelConfigAndOnline(context.Background(), ch.ID, wantOnline, func(*ipc.StreamConfig) {}); err != nil {
+					slog.Warn("更新 RTSP 探活状态失败", "channel", ch.ID, "err", err)
+				}
+			}()
+		}
+		wg.Wait()
+	}
+
+	time.Sleep(5 * time.Second)
+	check()
+	ticker := time.NewTicker(healthCheckInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		check()
+	}
+}
+
+// probeRTSP 收到任意 RTSP 响应（包括 401）都说明设备和 RTSP 服务可达。
+func probeRTSP(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || !strings.EqualFold(u.Scheme, "rtsp") || u.Hostname() == "" {
+		return false
+	}
+	port := u.Port()
+	if port == "" {
+		port = "554"
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(u.Hostname(), port), healthCheckTimeout)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(healthCheckTimeout))
+	if _, err := fmt.Fprintf(conn, "OPTIONS %s RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: owl-healthcheck\r\n\r\n", rawURL); err != nil {
+		return false
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	return err == nil && strings.HasPrefix(line, "RTSP/")
 }
 
 // InitDevice implements ipc.Protocoler.

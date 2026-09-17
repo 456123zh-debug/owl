@@ -654,8 +654,6 @@ func (a IPCAPI) getMediaInfo(c *gin.Context, in *channelIDInput) (any, error) {
 type refreshSnapshotInput struct {
 	// 指定获取多少秒内创建的快照
 	WithinSeconds int64 `json:"within_seconds"`
-	// 取快照的链接地址
-	URL string `json:"url"`
 }
 
 func (a IPCAPI) refreshSnapshot(c *gin.Context, in *refreshSnapshotWithIDInput) (any, error) {
@@ -678,42 +676,69 @@ func (a IPCAPI) refreshSnapshot(c *gin.Context, in *refreshSnapshotWithIDInput) 
 		}
 	}
 
-	snapshotURL := in.URL
 	mediaServerID := sms.DefaultMediaServerID
-	ch, chErr := a.ipc.GetChannel(c.Request.Context(), channelID)
-	if chErr == nil {
-		if ch.Config.MediaServerID != "" {
-			mediaServerID = ch.Config.MediaServerID
-		}
-		if snapshotURL == "" && ch.IsRTSP() && ch.Config.SourceURL != "" {
-			snapshotURL = ch.Config.SourceURL
-		}
+	ch, err := a.ipc.GetChannel(c.Request.Context(), channelID)
+	if err != nil {
+		return nil, err
+	}
+	if ch.Config.MediaServerID != "" {
+		mediaServerID = ch.Config.MediaServerID
+	}
+	svr, err := a.uc.SMSAPI.smsCore.GetMediaServer(c.Request.Context(), mediaServerID)
+	if err != nil {
+		return nil, err
 	}
 
-	if snapshotURL != "" || chErr == nil {
-		svr, err := a.uc.SMSAPI.smsCore.GetMediaServer(c.Request.Context(), mediaServerID)
-		if err != nil {
+	// 本地流不存在时，为快照临时创建 RTSP 拉流代理。none 模式抓图后释放；
+	// always/ai 模式由录像或分析任务继续持有。
+	media, mediaErr := a.uc.SMSAPI.smsCore.GetMediaInfo(svr, ch.GetApp(), ch.GetStream())
+	temporaryProxy := mediaErr != nil || len(media) == 0
+	if temporaryProxy && ch.IsRTSP() {
+		if _, err := a.uc.SMSAPI.smsCore.CreateStreamProxy(svr, sms.AddStreamProxyRequest{
+			App: ch.GetApp(), Stream: ch.GetStream(), URL: ch.Config.SourceURL, RTPType: ch.Config.Transport,
+		}); err != nil {
 			return nil, err
 		}
-		if snapshotURL == "" {
-			snapshotURL = fmt.Sprintf("rtsp://127.0.0.1:%d/%s/%s", svr.Ports.RTSP, ch.GetApp(), ch.GetStream())
-		}
-
-		img, err := a.uc.SMSAPI.smsCore.GetSnapshot(svr, sms.GetSnapRequest{
-			URL:        snapshotURL,
-			TimeoutSec: 10,
-			ExpireSec:  int(in.WithinSeconds),
-			Stream:     channelID,
-		})
-		if err != nil {
-			slog.ErrorContext(c.Request.Context(), "get snapshot", "err", err)
-		} else {
-			if hook.MD5FromBytes(img) != "" {
-				if err := a.ipc.Cover().Write(channelID, img); err != nil {
-					slog.ErrorContext(c.Request.Context(), "write cover", "err", err)
-				}
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			time.Sleep(300 * time.Millisecond)
+			media, err = a.uc.SMSAPI.smsCore.GetMediaInfo(svr, ch.GetApp(), ch.GetStream())
+			if err == nil && len(media) > 0 {
+				break
 			}
 		}
+		if len(media) == 0 {
+			return nil, reason.ErrServer.WithMsg("等待 RTSP 流上线超时")
+		}
+	}
+	if temporaryProxy && ch.Ext.IsNoneRecord() {
+		defer func() {
+			_, closeErr := a.uc.SMSAPI.smsCore.CloseStreams(svr, zlm.CloseStreamsRequest{
+				App: ch.GetApp(), Stream: ch.GetStream(), Force: true,
+			})
+			if closeErr != nil {
+				slog.WarnContext(context.Background(), "关闭快照临时流失败", "channel", channelID, "err", closeErr)
+			}
+		}()
+	}
+
+	// 请求体中的 url 由绑定器忽略。快照只能从媒体服务器中的现有流获取，
+	// 避免重复连接原始 RTSP 源。
+	snapshotURL := fmt.Sprintf("rtsp://127.0.0.1:%d/%s/%s", svr.Ports.RTSP, ch.GetApp(), ch.GetStream())
+	img, err := a.uc.SMSAPI.smsCore.GetSnapshot(svr, sms.GetSnapRequest{
+		URL:        snapshotURL,
+		TimeoutSec: 15,
+		ExpireSec:  int(in.WithinSeconds),
+		Stream:     channelID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if hook.MD5FromBytes(img) == "" {
+		return nil, reason.ErrServer.WithMsg("快照内容为空")
+	}
+	if err := a.ipc.Cover().Write(channelID, img); err != nil {
+		return nil, err
 	}
 
 	return gin.H{"link": fmt.Sprintf("%s/channels/%s/snapshot?token=%s", prefix, channelID, token)}, nil

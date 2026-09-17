@@ -198,6 +198,11 @@ build/windows:
 package/windows:
 	@bash ./scripts/package-windows.sh
 
+## dev/windows: 重新构建、替换并启动完整 Windows 版本
+.PHONY: dev/windows
+dev/windows:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/rebuild-windows.ps1
+
 docker/build:
 	@docker build --force-rm=true --push --platform linux/amd64,linux/arm64 -t registry.cn-shanghai.aliyuncs.com/ixugo/gowvp:latest -f Dockerfile .
 
