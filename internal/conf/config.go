@@ -1,6 +1,10 @@
 package conf
 
-import "time"
+import (
+	"net"
+	"strings"
+	"time"
+)
 
 type Bootstrap struct {
 	Debug        bool   `toml:"-" json:"-"`
@@ -127,6 +131,26 @@ type Media struct {
 	WebHookIP    string `comment:"用于流媒体 webhook 回调"`
 	RTPPortRange string `comment:"媒体服务器 RTP 端口范围"`
 	SDPIP        string `comment:"媒体服务器 SDP IP"`
+}
+
+// ResolveSDPIP returns the address advertised to cameras for RTP delivery.
+// A loopback address is valid for ZLM's local control plane but not for a
+// camera on the LAN, so fall back to the SIP/public-facing addresses.
+func (b *Bootstrap) ResolveSDPIP() string {
+	if b == nil {
+		return ""
+	}
+	for _, host := range []string{b.Media.SDPIP, b.Sip.Host, b.Media.WebHookIP, b.Media.IP} {
+		host = strings.TrimSpace(host)
+		if host == "" || strings.EqualFold(host, "localhost") {
+			continue
+		}
+		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
+			continue
+		}
+		return host
+	}
+	return ""
 }
 
 type Duration time.Duration

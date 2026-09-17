@@ -391,10 +391,6 @@ func (a IPCAPI) play(c *gin.Context, in *channelIDInput) (*playOutput, error) {
 
 	// 国标逻辑
 	if bz.IsGB28181(channelID) {
-		// 防止错误的配置，无法收到流
-		if a.uc.Conf.Media.SDPIP == "127.0.0.1" {
-			return nil, reason.ErrUsedLogic.WithMsg("请先配置流媒体 SDP 收流地址")
-		}
 		ch, err := a.ipc.GetChannel(c.Request.Context(), channelID)
 		if err != nil {
 			return nil, err
@@ -452,6 +448,9 @@ func (a IPCAPI) play(c *gin.Context, in *channelIDInput) (*playOutput, error) {
 	svr, err := a.uc.SMSAPI.smsCore.GetMediaServer(c.Request.Context(), mediaServerID)
 	if err != nil {
 		return nil, err
+	}
+	if bz.IsGB28181(channelID) && a.uc.Conf.ResolveSDPIP() == "" {
+		return nil, reason.ErrUsedLogic.WithMsg("请配置设备可访问的 SIP Host 或流媒体 SDP 收流地址")
 	}
 
 	stream = app + "/" + appStream

@@ -22,6 +22,9 @@ import (
 )
 
 func Run(bc *conf.Bootstrap) {
+	if sdpIP := bc.ResolveSDPIP(); sdpIP != "" {
+		bc.Media.SDPIP = sdpIP
+	}
 	if bc.Server.Recording.DiskUsageThreshold <= 0 {
 		bc.Server.Recording.DiskUsageThreshold = 95.0
 	}
