@@ -37,7 +37,7 @@ type EditMediaServerInput struct {
 	// Ports MediaServerPorts `json:"ports"`
 	// AutoConfig        bool             `json:"auto_config"`
 	Secret string `json:"secret"`
-	Type   string `json:"type"` // lalmax/zlm
+	Type   string `json:"type"` // zlm
 	// HookAliveInterval int              `json:"hook_alive_interval"`
 	// RTPEnable         bool             `json:"rtpenable"`
 	// Status            bool             `json:"status"`

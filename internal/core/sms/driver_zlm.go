@@ -12,6 +12,8 @@ import (
 	"github.com/gowvp/owl/pkg/zlm"
 )
 
+const pullTimeoutMS = 15_000
+
 // splitFirstPort 将 "20000-20100" 拆为首端口与剩余段。
 //
 // 为什么: ZLM WebRTC 默认占 UDP/TCP 8000, 线上部署每加一台机器就要单独放行安全组一个端口;
@@ -274,7 +276,7 @@ func (d *ZLMDriver) AddStreamProxy(ctx context.Context, ms *MediaServer, req *Ad
 		URL:           req.URL,
 		RTPType:       req.RTPType,
 		RetryCount:    3,
-		TimeoutSec:    PullTimeoutMs / 1000,
+		TimeoutSec:    pullTimeoutMS / 1000,
 		EnableHLSFMP4: new(true),
 		EnableAudio:   new(true),
 		EnableRTSP:    new(true),

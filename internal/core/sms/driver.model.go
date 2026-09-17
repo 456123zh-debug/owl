@@ -35,7 +35,6 @@ type AddStreamProxyRequest struct {
 
 type GetSnapRequest struct {
 	zlm.GetSnapRequest
-	// lalmax
 	Stream string `json:"stream"`
 }
 

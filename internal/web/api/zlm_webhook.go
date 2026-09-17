@@ -149,11 +149,6 @@ func (w WebHookAPI) onStreamChanged(c *gin.Context, in *onStreamChangedInput) (D
 
 	stream := in.Stream
 	app := in.App
-	// lalmax 兼容
-	if in.StreamName != "" {
-		stream = in.StreamName
-		app = in.AppName
-	}
 
 	// 通过 app+stream 查询通道获取类型，支持自定义 app/stream
 	channelType := w.getChannelType(ctx, app, stream)
@@ -283,15 +278,10 @@ func (w WebHookAPI) onStreamNotFound(c *gin.Context, in *onStreamNotFoundInput) 
 	ctx := c.Request.Context()
 	w.log.InfoContext(ctx, "webhook onStreamNotFound", "app", in.App, "stream", in.Stream, "schema", in.Schema, "mediaServerID", in.MediaServerID)
 
-	stream := in.StreamName
-	app := in.AppName
-	// 确保不是 lalmax 的流
-	if in.StreamName == "" {
-		stream = in.Stream
-		app = in.App
-		if !(in.Schema == "rtmp" || in.Schema == "rtsp") {
-			return newDefaultOutputOK(), nil
-		}
+	stream := in.Stream
+	app := in.App
+	if !(in.Schema == "rtmp" || in.Schema == "rtsp") {
+		return newDefaultOutputOK(), nil
 	}
 
 	// 通过 app+stream 查询通道获取类型，支持自定义 app/stream

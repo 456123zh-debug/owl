@@ -40,7 +40,6 @@ func NewNodeManager(storer Storer) *NodeManager {
 		quit:    make(chan struct{}, 1),
 	}
 	n.RegisterDriver(ProtocolZLMediaKit, NewZLMDriver())
-	n.RegisterDriver(ProtocolLalmax, NewLalmaxDriver())
 	go n.tickCheck()
 	return &n
 }

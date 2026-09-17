@@ -70,10 +70,6 @@ type onStreamChangedInput struct {
 	TotalReaderCount int        `json:"totalReaderCount"`
 	Tracks           []Tracks   `json:"tracks"`
 	Vhost            string     `json:"vhost"`
-
-	// 以下字段为 lalmax 新增
-	AppName    string `json:"app_name"`    // 流应用名
-	StreamName string `json:"stream_name"` // 流名称
 }
 type OriginSock struct {
 	Identifier string `json:"identifier"`
@@ -217,9 +213,6 @@ type onStreamNotFoundInput struct {
 	Stream        string `json:"stream"`        // 流 ID
 	Vhost         string `json:"vhost"`         // 流虚拟主机
 
-	// 以下字段为 lalmax 新增
-	AppName    string `json:"app_name"`    // 流应用名
-	StreamName string `json:"stream_name"` // 流名称
 }
 
 // onRecordMP4Input 录制 mp4 完成后通知事件参数

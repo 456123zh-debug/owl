@@ -8,12 +8,11 @@ import (
 
 const (
 	ProtocolZLMediaKit = "zlm"
-	ProtocolLalmax     = "lalmax"
 )
 
 // Driver 定义流媒体服务的通用行为
 type Driver interface {
-	// Protocol 返回协议/类型名称，如 "zlm", "srs"
+	// Protocol 返回协议/类型名称。
 	Protocol() string
 
 	// Connect 测试连接并获取初始信息 (对应目前的 connection 方法中的部分逻辑)

@@ -107,7 +107,7 @@
   HTTPPort = 18080
   # 媒体服务器密钥
   Secret = '882e041f6e489fe77a4af9b272806c25'
-  # 媒体服务器类型 zlm/lalmax
+  # 媒体服务器类型，仅支持 zlm
   Type = 'zlm'
   # 用于流媒体 webhook 回调
   WebHookIP = '192.168.31.10'
