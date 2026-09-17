@@ -54,6 +54,12 @@ func Run(bc *conf.Bootstrap) {
 	if err := os.Chdir(filepath.Dir(bin)); err != nil {
 		slog.Error("change work dir fail", "err", err)
 	}
+	// Windows 一键包中的 MediaServer 以自己的目录为工作目录，配置里的相对录像路径
+	// 会落到 MediaServer/configs/recordings。OWL 必须使用同一个绝对目录提供播放、
+	// 下载和清理，否则数据库有记录且文件存在，静态路由仍会返回 404。
+	if os.Getenv("OWL_ONE_CLICK") == "1" && !filepath.IsAbs(bc.Server.Recording.StorageDir) {
+		bc.Server.Recording.StorageDir = filepath.Join(filepath.Dir(bin), "MediaServer", strings.TrimPrefix(filepath.Clean(bc.Server.Recording.StorageDir), "."+string(filepath.Separator)))
+	}
 
 	log, clean := SetupLog(bc)
 	defer clean()
