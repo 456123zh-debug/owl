@@ -3,6 +3,7 @@ package recording
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/ixugo/goddd/pkg/orm"
@@ -35,7 +36,8 @@ func (c Core) ListRecordings(ctx context.Context, in *FindRecordingInput) ([]*Re
 	}
 	for _, item := range items {
 		if ctx, ok := ctx.(web.Context); ok {
-			item.Path = ctx.BaseURLJoin("/static/recordings", item.Path)
+			path := strings.TrimLeft(strings.ReplaceAll(item.Path, "\\", "/"), "/")
+			item.Path = ctx.BaseURLJoin("/static/recordings", path)
 		}
 	}
 	return items, total, nil

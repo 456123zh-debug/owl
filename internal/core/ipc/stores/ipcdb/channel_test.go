@@ -188,6 +188,36 @@ func TestChannelList(t *testing.T) {
 	}
 }
 
+func TestChannelListHasRecording(t *testing.T) {
+	db := testDB(t)
+	store := NewChannel(db)
+	ctx := context.Background()
+	seedChannel(t, store, "ch_rec_1", "dev_001", "recorded", ipc.TypeRTSP, "pull", "rec1")
+	seedChannel(t, store, "ch_rec_2", "dev_001", "empty", ipc.TypeRTSP, "pull", "rec2")
+	if err := db.Exec("CREATE TABLE recordings (id INTEGER PRIMARY KEY, cid TEXT)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO recordings (cid) VALUES (?)", "ch_rec_1").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := store.List(ctx, &ipc.FindChannelInput{
+		PagerFilter:  web.NewPagerFilterMaxSize(),
+		HasRecording: "true",
+	})
+	if err != nil || total != 1 || len(items) != 1 || items[0].ID != "ch_rec_1" {
+		t.Fatalf("has_recording=true: total=%d items=%v err=%v", total, items, err)
+	}
+
+	items, total, err = store.List(ctx, &ipc.FindChannelInput{
+		PagerFilter:  web.NewPagerFilterMaxSize(),
+		HasRecording: "false",
+	})
+	if err != nil || total != 1 || len(items) != 1 || items[0].ID != "ch_rec_2" {
+		t.Fatalf("has_recording=false: total=%d items=%v err=%v", total, items, err)
+	}
+}
+
 func TestChannelBatchOfflineByType(t *testing.T) {
 	s := testStore(t)
 	store := s.Channel()

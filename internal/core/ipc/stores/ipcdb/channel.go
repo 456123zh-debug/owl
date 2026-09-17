@@ -131,6 +131,15 @@ func (d ChannelDB) List(ctx context.Context, in *ipc.FindChannelInput) ([]*ipc.C
 	if in.Stream != "" {
 		db = db.Where("stream = ?", in.Stream)
 	}
+	if in.HasRecording == "true" || in.HasRecording == "false" {
+		hasRecording, _ := strconv.ParseBool(in.HasRecording)
+		exists := "EXISTS (SELECT 1 FROM recordings WHERE recordings.cid = channels.id)"
+		if hasRecording {
+			db = db.Where(exists)
+		} else {
+			db = db.Where("NOT " + exists)
+		}
+	}
 
 	// 排序
 	if in.OrderBy != "" {

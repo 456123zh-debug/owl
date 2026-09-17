@@ -267,13 +267,26 @@ func (a IPCAPI) ListChannelsForDevice(c *gin.Context, in *ipc.FindDeviceInput) (
 // >>> channel >>>>>>>>>>>>>>>>>>>>
 
 func (a IPCAPI) listChannels(c *gin.Context, in *ipc.FindChannelInput) (any, error) {
-	items, total, err := a.ipc.ListChannels(c.Request.Context(), in)
+	ctx := c.Request.Context()
+	items, total, err := a.ipc.ListChannels(ctx, in)
 	if err != nil {
 		return nil, err
 	}
 
 	// 为 RTMP 类型通道生成推流地址
 	a.fillRTMPPushAddr(c, items)
+
+	cids := make([]string, 0, len(items))
+	for _, item := range items {
+		cids = append(cids, item.ID)
+	}
+	hasRecording, err := a.recordingCore.HasRecordings(ctx, cids)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		item.HasRecording = hasRecording[item.ID]
+	}
 
 	return gin.H{"items": items, "total": total}, nil
 }
@@ -665,14 +678,29 @@ func (a IPCAPI) refreshSnapshot(c *gin.Context, in *refreshSnapshotWithIDInput) 
 		}
 	}
 
-	if in.URL != "" {
-		svr, err := a.uc.SMSAPI.smsCore.GetMediaServer(c.Request.Context(), sms.DefaultMediaServerID)
+	snapshotURL := in.URL
+	mediaServerID := sms.DefaultMediaServerID
+	ch, chErr := a.ipc.GetChannel(c.Request.Context(), channelID)
+	if chErr == nil {
+		if ch.Config.MediaServerID != "" {
+			mediaServerID = ch.Config.MediaServerID
+		}
+		if snapshotURL == "" && ch.IsRTSP() && ch.Config.SourceURL != "" {
+			snapshotURL = ch.Config.SourceURL
+		}
+	}
+
+	if snapshotURL != "" || chErr == nil {
+		svr, err := a.uc.SMSAPI.smsCore.GetMediaServer(c.Request.Context(), mediaServerID)
 		if err != nil {
 			return nil, err
 		}
+		if snapshotURL == "" {
+			snapshotURL = fmt.Sprintf("rtsp://127.0.0.1:%d/%s/%s", svr.Ports.RTSP, ch.GetApp(), ch.GetStream())
+		}
 
 		img, err := a.uc.SMSAPI.smsCore.GetSnapshot(svr, sms.GetSnapRequest{
-			URL:        in.URL,
+			URL:        snapshotURL,
 			TimeoutSec: 10,
 			ExpireSec:  int(in.WithinSeconds),
 			Stream:     channelID,

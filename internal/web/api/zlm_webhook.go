@@ -338,7 +338,7 @@ func (w WebHookAPI) onRecordMP4(c *gin.Context, in *onRecordMP4Input) (DefaultOu
 		StartedAt: orm.Time{Time: startTime},
 		EndedAt:   orm.Time{Time: endTime},
 		Duration:  in.TimeLen,
-		Path:      filepath.Clean(relativePath),
+		Path:      strings.TrimLeft(filepath.ToSlash(filepath.Clean(relativePath)), "/"),
 		Size:      in.FileSize,
 	})
 	if err != nil {
@@ -354,12 +354,14 @@ func (w WebHookAPI) onRecordMP4(c *gin.Context, in *onRecordMP4Input) (DefaultOu
 // "/data/oldrecordings/x.mp4"，截出错误相对路径；取最右侧出现（LastIndex）
 // 以命中真实存储根；匹配不到时回退 fallback
 func relativeRecordingPath(filePath, storageDir, fallback string) string {
-	sep := string(filepath.Separator)
-	if strings.HasPrefix(filePath, storageDir+sep) {
-		return filePath
+	filePath = strings.ReplaceAll(filePath, "\\", "/")
+	storageDir = strings.Trim(strings.ReplaceAll(storageDir, "\\", "/"), "./")
+	fallback = strings.ReplaceAll(fallback, "\\", "/")
+	if strings.HasPrefix(filePath, storageDir+"/") {
+		return strings.TrimPrefix(filePath, storageDir+"/")
 	}
-	if idx := strings.LastIndex(filePath, sep+storageDir+sep); idx >= 0 {
-		return filePath[idx+1:]
+	if idx := strings.LastIndex(filePath, "/"+storageDir+"/"); idx >= 0 {
+		return filePath[idx+len(storageDir)+2:]
 	}
-	return fallback
+	return strings.TrimLeft(fallback, "/")
 }

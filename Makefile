@@ -193,6 +193,11 @@ build/windows:
 	$(eval GOOS := windows)
 	@make build/local GOOS=$(GOOS) GOARCH=$(GOARCH)
 
+## package/windows: 构建包含前端和 MediaServer 的 Windows 免安装包
+.PHONY: package/windows
+package/windows:
+	@bash ./scripts/package-windows.sh
+
 docker/build:
 	@docker build --force-rm=true --push --platform linux/amd64,linux/arm64 -t registry.cn-shanghai.aliyuncs.com/ixugo/gowvp:latest -f Dockerfile .
 
