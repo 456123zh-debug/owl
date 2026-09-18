@@ -42,10 +42,9 @@ func (a *Adapter) OnStreamNotFound(ctx context.Context, app, stream string) erro
 	}
 
 	_, err = a.sms.CreateStreamProxy(svr, sms.AddStreamProxyRequest{
-		App:        app,
-		Stream:     stream,
-		URL:        streamURI,
-		PersistHLS: !ch.Ext.IsNoneRecord(),
+		App:    app,
+		Stream: stream,
+		URL:    streamURI,
 	})
 	if err == nil {
 		if err := a.adapter.UpdatePlaying(ctx, ch.DeviceID, ch.ChannelID, true); err != nil {

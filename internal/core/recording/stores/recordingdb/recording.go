@@ -51,6 +51,9 @@ func (d Recording) applyFilters(db *gorm.DB, in *recording.FindRecordingInput) *
 	if in.DeleteFlagEq != nil {
 		db = db.Where("delete_flag = ?", *in.DeleteFlagEq)
 	}
+	if in.RetainUntilBefore != nil {
+		db = db.Where("retain_until < ?", orm.Time{Time: *in.RetainUntilBefore})
+	}
 	return db
 }
 

@@ -100,7 +100,8 @@ func (w WebHookAPI) onPublish(c *gin.Context, in *onPublishInput) (*onPublishOut
 	w.log.Info("webhook onPublish", "app", in.App, "stream", in.Stream, "schema", in.Schema, "mediaServerID", in.MediaServerID)
 	publishOutput := &onPublishOutput{DefaultOutput: newDefaultOutputOK()}
 	if ch, err := w.ipcCore.GetChannelByAppStreamOrID(ctx, in.App, in.Stream); err == nil {
-		record := !ch.Ext.IsNoneRecord() && !w.conf.Server.Recording.Disabled
+		plan, active := w.recordingCore.ResolvePlan(ctx, ch.ID, time.Now())
+		record := active && plan.RecordType == recording.RecordTypeContinuous && !w.conf.Server.Recording.Disabled
 		publishOutput.EnableHlsFmp4 = &record
 		publishOutput.EnableHls = new(false)
 		publishOutput.EnableMp4 = new(false)
@@ -236,9 +237,7 @@ func (w WebHookAPI) onStreamNoneReader(c *gin.Context, in *onStreamNoneReaderInp
 		return onStreamNoneReaderOutput{Close: true}, nil
 	}
 
-	// 根据录像模式判断是否关闭流：
-	// - none(不录制): 无人观看时关闭流
-	// - always/ai(有录像计划): 无人观看时保持流不关闭
+	// 当前有生效的录像计划时保持源流，否则允许无人观看时关闭。
 	ch, err := w.ipcCore.GetChannelByAppStreamOrID(ctx, in.App, in.Stream)
 	if err != nil {
 		// 找不到通道时默认关闭流
@@ -246,9 +245,9 @@ func (w WebHookAPI) onStreamNoneReader(c *gin.Context, in *onStreamNoneReaderInp
 		return onStreamNoneReaderOutput{Close: true}, nil
 	}
 
-	// 如果录像模式为 none，则关闭流；否则保持流不关闭以继续录制
-	shouldClose := ch.Ext.IsNoneRecord()
-	w.log.InfoContext(ctx, "无人观看判断", "stream", in.Stream, "record_mode", ch.Ext.GetRecordMode(), "close", shouldClose)
+	_, active := w.recordingCore.ResolvePlan(ctx, ch.ID, time.Now())
+	shouldClose := !active
+	w.log.InfoContext(ctx, "无人观看判断", "stream", in.Stream, "scheduled", active, "close", shouldClose)
 	if shouldClose {
 		// 更新通道的播放状态为未播放（所有协议统一处理）
 		if _, err := w.ipcCore.UpdateChannelPlaying(ctx, in.Stream, false); err != nil {
@@ -345,17 +344,29 @@ func (w WebHookAPI) onRecordTS(c *gin.Context, in *onRecordTSInput) (DefaultOutp
 		cid = in.Stream
 		w.log.WarnContext(ctx, "未找到对应通道，使用 stream 作为 CID", "app", in.App, "stream", in.Stream)
 	}
+	plan, active := w.recordingCore.ResolvePlan(ctx, cid, startTime)
+	if !active {
+		w.log.WarnContext(ctx, "忽略计划外录像分片", "cid", cid, "started_at", startTime)
+		_ = os.Remove(in.FilePath)
+		if strings.EqualFold(filepath.Ext(in.FilePath), ".m4s") {
+			_ = os.Remove(strings.TrimSuffix(in.FilePath, filepath.Ext(in.FilePath)) + ".mp4")
+		}
+		return newDefaultOutputOK(), nil
+	}
+	retainUntil := endTime.AddDate(0, 0, plan.RetentionDays)
 
 	// 入库
 	_, err = w.recordingCore.CreateRecording(ctx, &recording.AddRecordingInput{
-		CID:       cid,
-		App:       in.App,
-		Stream:    in.Stream,
-		StartedAt: orm.Time{Time: startTime},
-		EndedAt:   orm.Time{Time: endTime},
-		Duration:  in.TimeLen,
-		Path:      strings.TrimLeft(filepath.ToSlash(filepath.Clean(relativePath)), "/"),
-		Size:      in.FileSize,
+		PlanID:      plan.ID,
+		CID:         cid,
+		App:         in.App,
+		Stream:      in.Stream,
+		StartedAt:   orm.Time{Time: startTime},
+		EndedAt:     orm.Time{Time: endTime},
+		Duration:    in.TimeLen,
+		Path:        strings.TrimLeft(filepath.ToSlash(filepath.Clean(relativePath)), "/"),
+		Size:        in.FileSize,
+		RetainUntil: &orm.Time{Time: retainUntil},
 	})
 	if err != nil {
 		w.log.ErrorContext(ctx, "录像入库失败", "err", err)

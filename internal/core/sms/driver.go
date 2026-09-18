@@ -35,4 +35,6 @@ type Driver interface {
 	GetMediaInfo(ctx context.Context, ms *MediaServer, app, stream string) ([]zlm.MediaItem, error)
 
 	GetMediaList(ctx context.Context, ms *MediaServer) (*zlm.GetMediaListResponse, error)
+	StartHLSRecord(ctx context.Context, ms *MediaServer, req zlm.RecordControlRequest) error
+	StopHLSRecord(ctx context.Context, ms *MediaServer, req zlm.RecordControlRequest) error
 }

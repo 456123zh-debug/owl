@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -278,15 +276,7 @@ func (d *ZLMDriver) CloseStreams(ctx context.Context, ms *MediaServer, req *zlm.
 
 func (d *ZLMDriver) AddStreamProxy(ctx context.Context, ms *MediaServer, req *AddStreamProxyRequest) (*zlm.AddStreamProxyResponse, error) {
 	engine := d.withConfig(ms)
-	enableHLS := req.PersistHLS
-	var hlsSavePath *string
-	if req.PersistHLS {
-		path := filepath.Join(ms.RecordingStorageDir, time.Now().Format("2006-01-02"), time.Now().Format("15-04-05.000"))
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			return nil, fmt.Errorf("create HLS recording directory: %w", err)
-		}
-		hlsSavePath = &path
-	}
+	enableHLS := false
 	return engine.AddStreamProxy(zlm.AddStreamProxyRequest{
 		Vhost:         "__defaultVhost__",
 		App:           req.App,
@@ -296,7 +286,6 @@ func (d *ZLMDriver) AddStreamProxy(ctx context.Context, ms *MediaServer, req *Ad
 		RetryCount:    3,
 		TimeoutSec:    pullTimeoutMS / 1000,
 		EnableHLSFMP4: &enableHLS,
-		HLSSavePath:   hlsSavePath,
 		EnableAudio:   new(true),
 		EnableRTSP:    new(true),
 		EnableRTMP:    new(true),
@@ -330,4 +319,14 @@ func (d *ZLMDriver) GetMediaInfo(ctx context.Context, ms *MediaServer, app, stre
 func (d *ZLMDriver) GetMediaList(ctx context.Context, ms *MediaServer) (*zlm.GetMediaListResponse, error) {
 	engine := d.withConfig(ms)
 	return engine.GetMediaList()
+}
+
+func (d *ZLMDriver) StartHLSRecord(ctx context.Context, ms *MediaServer, req zlm.RecordControlRequest) error {
+	engine := d.withConfig(ms)
+	return engine.StartHLSRecord(req)
+}
+
+func (d *ZLMDriver) StopHLSRecord(ctx context.Context, ms *MediaServer, req zlm.RecordControlRequest) error {
+	engine := d.withConfig(ms)
+	return engine.StopHLSRecord(req)
 }

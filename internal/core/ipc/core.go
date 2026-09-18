@@ -69,6 +69,10 @@ func (c Core) GetProtocol(atype string) Protocoler {
 	return c.protocols[atype]
 }
 
+// IsConfigured reports whether the core has a backing store. It is primarily
+// useful for optional webhook integrations and lightweight test instances.
+func (c Core) IsConfigured() bool { return c.store != nil }
+
 // Cover 返回快照管理器，外部通过此方法读写快照。
 func (c Core) Cover() CoverManager {
 	return c.coverManager

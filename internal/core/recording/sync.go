@@ -9,7 +9,7 @@ import (
 
 const (
 	// syncDefaultInterval 默认录制同步周期
-	syncDefaultInterval = 5 * time.Minute
+	syncDefaultInterval = 30 * time.Second
 	// syncInitialDelay 首次同步延迟，等待设备注册和 catalog 完成
 	syncInitialDelay = 30 * time.Second
 	// snapshotConcurrency 取快照触发拉流的最大并发数，防止大量 INVITE 冲击设备
@@ -62,7 +62,7 @@ func (c Core) StartRecordingSyncLoop(ctx context.Context) {
 }
 
 // syncRecordingTasks 执行一次录制状态同步
-// 1. 查询所有在线通道（含 RecordMode）
+// 1. 查询所有在线通道及其当前生效的录像计划
 // 2. 一次 getMediaList 批量获取 ZLM 上所有源流
 // 3. 对应录制但尚无源流的通道触发拉流。持久化参数在 on_publish 决定。
 func (c Core) syncRecordingTasks(ctx context.Context) {
@@ -93,10 +93,22 @@ func (c Core) syncRecordingTasks(ctx context.Context) {
 		}
 
 		key := ch.App + "/" + ch.Stream
-		_, streamExists := recordingMap[key]
-		shouldRecord := ch.RecordMode != "none"
+		recordingNow, streamExists := recordingMap[key]
+		plan, active := c.ResolvePlan(ctx, ch.ID, time.Now())
+		shouldRecord := active && plan.RecordType == RecordTypeContinuous
+		if c.IsEventRecording(ch.App, ch.Stream) {
+			shouldRecord = true
+		}
 
-		if shouldRecord && !streamExists {
+		if shouldRecord && streamExists && !recordingNow {
+			if err := c.smsProvider.StartRecording(ch.App, ch.Stream); err != nil {
+				slog.WarnContext(ctx, "sync: 开始录像失败", "channel", ch.ID, "err", err)
+			}
+		} else if !shouldRecord && recordingNow {
+			if err := c.smsProvider.StopRecording(ch.App, ch.Stream); err != nil {
+				slog.WarnContext(ctx, "sync: 停止录像失败", "channel", ch.ID, "err", err)
+			}
+		} else if shouldRecord && !streamExists {
 			needTrigger = append(needTrigger, ch)
 		} else {
 			skipped++

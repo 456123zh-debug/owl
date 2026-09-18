@@ -3,6 +3,10 @@ package adapter
 import (
 	"github.com/gowvp/owl/internal/core/recording"
 	"github.com/gowvp/owl/internal/core/sms"
+	"github.com/gowvp/owl/pkg/zlm"
+	"os"
+	"path/filepath"
+	"time"
 )
 
 var _ recording.SMSProvider = (*SMSAdapter)(nil)
@@ -11,6 +15,26 @@ var _ recording.SMSProvider = (*SMSAdapter)(nil)
 // 将 sms.Core 的录制能力适配给 recording 领域使用
 type SMSAdapter struct {
 	smsCore sms.Core
+}
+
+func (a *SMSAdapter) StartRecording(app, stream string) error {
+	ms, err := a.smsCore.GetDefaultMediaServer()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(ms.RecordingStorageDir, time.Now().Format("2006-01-02"), time.Now().Format("15-04-05.000"))
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return err
+	}
+	return a.smsCore.StartHLSRecord(ms, zlm.RecordControlRequest{Vhost: "__defaultVhost__", App: app, Stream: stream, CustomizedPath: path})
+}
+
+func (a *SMSAdapter) StopRecording(app, stream string) error {
+	ms, err := a.smsCore.GetDefaultMediaServer()
+	if err != nil {
+		return err
+	}
+	return a.smsCore.StopHLSRecord(ms, zlm.RecordControlRequest{Vhost: "__defaultVhost__", App: app, Stream: stream})
 }
 
 // NewSMSAdapter 创建 SMS 适配器，返回 recording.SMSProvider 接口

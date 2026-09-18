@@ -364,3 +364,19 @@ func (n *NodeManager) GetMediaList(server *MediaServer) (*zlm.GetMediaListRespon
 	}
 	return driver.GetMediaList(context.Background(), server)
 }
+
+func (n *NodeManager) StartHLSRecord(server *MediaServer, req zlm.RecordControlRequest) error {
+	driver, err := n.getDriver(server.Type)
+	if err != nil {
+		return err
+	}
+	return driver.StartHLSRecord(context.Background(), server, req)
+}
+
+func (n *NodeManager) StopHLSRecord(server *MediaServer, req zlm.RecordControlRequest) error {
+	driver, err := n.getDriver(server.Type)
+	if err != nil {
+		return err
+	}
+	return driver.StopHLSRecord(context.Background(), server, req)
+}

@@ -183,8 +183,8 @@ func NewIPCCoreWithProtocols(store ipc.Storer, uni uniqueid.Core, adapter ipc.Ad
 }
 
 // NewAIWebhookAPIWithDeps 创建带依赖的 AI Webhook API
-func NewAIWebhookAPIWithDeps(conf *conf.Bootstrap, eventCore event.Core, ipcBundle IPCBundle) AIWebhookAPI {
-	return NewAIWebhookAPI(conf, eventCore, ipcBundle.Core)
+func NewAIWebhookAPIWithDeps(conf *conf.Bootstrap, eventCore event.Core, ipcBundle IPCBundle, recordingCore recording.Core) AIWebhookAPI {
+	return NewAIWebhookAPI(conf, eventCore, ipcBundle.Core, recordingCore)
 }
 
 // NewSMSProviderAdapter 创建 SMS 适配器，将 sms.Core 适配为 recording.SMSProvider

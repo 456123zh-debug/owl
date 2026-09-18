@@ -1437,9 +1437,46 @@
         ]
       }
     },
-    "/channels/{id}/record_mode": {
-      "post": {
-        "summary": "设置录像模式",
+    "/channels/{id}/recording-plan": {
+      "get": {
+        "summary": "查询通道录像计划",
+        "tags": [
+          "通道"
+        ],
+        "x-apifox-folder": "通道",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelRecordingPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "绑定通道录像计划",
         "tags": [
           "通道"
         ],
@@ -1461,11 +1498,14 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "mode": {
-                    "type": "string",
-                    "description": "always、ai、none"
+                  "plan_id": {
+                    "type": "integer",
+                    "format": "int64"
                   }
-                }
+                },
+                "required": [
+                  "plan_id"
+                ]
               }
             }
           }
@@ -1476,7 +1516,49 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RecordMode"
+                  "$ref": "#/components/schemas/ChannelRecordingPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "summary": "解绑通道录像计划",
+        "tags": [
+          "通道"
+        ],
+        "x-apifox-folder": "通道",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "unbound": {
+                      "type": "boolean"
+                    }
+                  }
                 }
               }
             }
@@ -1565,6 +1647,208 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MediaInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/recording-plans": {
+      "get": {
+        "summary": "录像计划列表",
+        "tags": [
+          "录像"
+        ],
+        "x-apifox-folder": "录像",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecordingPlan"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "新建录像计划",
+        "tags": [
+          "录像"
+        ],
+        "x-apifox-folder": "录像",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingPlanInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/recording-plans/{id}": {
+      "get": {
+        "summary": "录像计划详情",
+        "tags": [
+          "录像"
+        ],
+        "x-apifox-folder": "录像",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "更新录像计划",
+        "tags": [
+          "录像"
+        ],
+        "x-apifox-folder": "录像",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingPlanInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "summary": "删除录像计划并解绑通道",
+        "tags": [
+          "录像"
+        ],
+        "x-apifox-folder": "录像",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
                 }
               }
             }
@@ -3212,10 +3496,6 @@
           "analysis_interval": {
             "type": "number",
             "format": "double"
-          },
-          "record_mode": {
-            "type": "string",
-            "description": "always、ai、none"
           }
         }
       },
@@ -3611,14 +3891,182 @@
           }
         }
       },
-      "RecordMode": {
+      "SchedulePeriod": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 1,
+              "maximum": 7,
+              "description": "ISO 星期：1=星期一，7=星期日"
+            }
+          },
+          "start": {
+            "type": "string",
+            "description": "HH:mm"
+          },
+          "end": {
+            "type": "string",
+            "description": "HH:mm；小于 start 表示跨午夜"
+          }
+        },
+        "required": [
+          "days",
+          "start",
+          "end"
+        ]
+      },
+      "EventRecordingConfig": {
+        "type": "object",
+        "properties": {
+          "event_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "空数组表示所有事件类型"
+            }
+          },
+          "min_confidence": {
+            "type": "number",
+            "format": "double",
+            "description": "最小置信度，0-1",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "post_record_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "仅告警事件录像使用：告警后录像秒数",
+            "minimum": 1,
+            "maximum": 3600
+          },
+          "merge_interval_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "仅告警事件录像使用：相邻告警录像合并窗口秒数",
+            "minimum": 0
+          }
+        }
+      },
+      "RecordingPlanInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA 时区，例如 Asia/Shanghai"
+          },
+          "record_type": {
+            "type": "string",
+            "enum": [
+              "continuous",
+              "event"
+            ],
+            "description": "continuous=计划内持续录像；event=仅告警时录像"
+          },
+          "ai_enabled": {
+            "type": "boolean",
+            "description": "是否启动该计划通道的 AI 分析；false 时不消耗 AI 推理资源"
+          },
+          "weekly_schedule": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SchedulePeriod"
+            }
+          },
+          "retention_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "event_config": {
+            "$ref": "#/components/schemas/EventRecordingConfig",
+            "description": "ai_enabled=false 时忽略；持续录像模式下只关联告警，不会额外启动录像；event模式下用于触发录像"
+          }
+        },
+        "required": [
+          "name",
+          "enabled",
+          "record_type",
+          "ai_enabled",
+          "weekly_schedule",
+          "retention_days"
+        ]
+      },
+      "RecordingPlan": {
         "type": "object",
         "properties": {
           "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
             "type": "string"
           },
-          "record_mode": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "timezone": {
             "type": "string"
+          },
+          "record_type": {
+            "type": "string"
+          },
+          "ai_enabled": {
+            "type": "boolean"
+          },
+          "weekly_schedule": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SchedulePeriod"
+            }
+          },
+          "retention_days": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "event_config": {
+            "$ref": "#/components/schemas/EventRecordingConfig"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ChannelRecordingPlan": {
+        "type": "object",
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/RecordingPlan"
           }
         }
       },
@@ -3665,6 +4113,12 @@
             "format": "int64",
             "description": "fMP4 媒体分片记录 ID"
           },
+          "plan_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "产生该分片的录像计划 ID；旧分片可能为 0",
+            "nullable": true
+          },
           "cid": {
             "type": "string",
             "description": "通道 ID"
@@ -3686,6 +4140,12 @@
             "type": "string",
             "format": "date-time",
             "description": "分片结束时间"
+          },
+          "retain_until": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "按计划计算的删除时间；旧分片可能为空"
           },
           "duration": {
             "type": "number",

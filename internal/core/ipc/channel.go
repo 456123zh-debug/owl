@@ -319,18 +319,6 @@ func (c Core) SetAIEnabled(ctx context.Context, channelID string, enabled bool) 
 	return &out, nil
 }
 
-// SetRecordMode 设置通道的录像模式，支持 always/ai/none 三种模式
-func (c Core) SetRecordMode(ctx context.Context, channelID string, mode string) (*Channel, error) {
-	out := Channel{ID: channelID}
-	if err := c.store.Channel().Update(ctx, &out, func(b *Channel) error {
-		b.Ext.RecordMode = mode
-		return nil
-	}); err != nil {
-		return nil, reason.ErrDB.Withf(`Update err[%s]`, err.Error())
-	}
-	return &out, nil
-}
-
 // GetChannelByAppStream 通过 app 和 stream 获取通道
 func (c Core) GetChannelByAppStream(ctx context.Context, app, stream string) (*Channel, error) {
 	out, err := c.store.Channel().GetByAppStream(ctx, app, stream)

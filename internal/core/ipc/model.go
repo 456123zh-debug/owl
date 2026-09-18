@@ -42,27 +42,6 @@ type DeviceExt struct {
 	EnabledAI        bool    `json:"enabled_ai"`        // 是否启用 AI
 	AnalysisInterval float32 `json:"analysis_interval"` // AI 分析间隔（秒），0 表示使用默认值
 
-	// 空串表示 always
-	RecordMode string `json:"record_mode"` // 录像模式, 一直录制:always, 按AI触发:ai, 不录制:none
-}
-
-func (e *DeviceExt) GetRecordMode() string {
-	if e.RecordMode == "" {
-		return "always"
-	}
-	return e.RecordMode
-}
-
-func (e *DeviceExt) IsAlwaysRecord() bool {
-	return e.RecordMode == "always" || e.RecordMode == ""
-}
-
-func (e *DeviceExt) IsAIRecord() bool {
-	return e.RecordMode == "ai"
-}
-
-func (e *DeviceExt) IsNoneRecord() bool {
-	return e.RecordMode == "none"
 }
 
 // Scan implements orm.Scaner.

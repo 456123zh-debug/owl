@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gowvp/owl/internal/conf"
@@ -20,6 +21,8 @@ type Storer interface {
 type SMSProvider interface {
 	// Persistence is selected in on_publish; this reports source stream presence.
 	ListRecordingStreams() (map[string]bool, error)
+	StartRecording(app, stream string) error
+	StopRecording(app, stream string) error
 }
 
 // IPCProvider 通道信息提供者，解耦录制域与 ipc 域
@@ -30,11 +33,10 @@ type IPCProvider interface {
 
 // ChannelInfo 同步任务使用的通道信息摘要
 type ChannelInfo struct {
-	ID         string // 通道唯一 ID
-	App        string // 应用名（如 rtp / live）
-	Stream     string // 流 ID
-	Type       string // 通道类型（gb28181 / onvif / rtmp / rtsp）
-	RecordMode string // 录像模式（always / ai / none / 空串=always）
+	ID     string // 通道唯一 ID
+	App    string // 应用名（如 rtp / live）
+	Stream string // 流 ID
+	Type   string // 通道类型（gb28181 / onvif / rtmp / rtsp）
 }
 
 // PlayProvider 主动拉流能力，解耦录制域与播放域
@@ -51,6 +53,12 @@ type Core struct {
 	ipcProvider  IPCProvider
 	playProvider PlayProvider
 	syncInterval time.Duration // 0 表示使用默认值 syncDefaultInterval
+	eventState   *eventRecordingState
+}
+
+type eventRecordingState struct {
+	mu     sync.Mutex
+	timers map[string]*time.Timer
 }
 
 type Option func(*Core)
@@ -92,7 +100,7 @@ func WithSyncInterval(d time.Duration) Option {
 
 // NewCore create business domain
 func NewCore(store Storer, opts ...Option) Core {
-	c := Core{store: store}
+	c := Core{store: store, eventState: &eventRecordingState{timers: make(map[string]*time.Timer)}}
 	for _, opt := range opts {
 		opt(&c)
 	}

@@ -115,13 +115,6 @@ type addZoneWithIDInput struct {
 	ipc.AddZoneInput
 }
 
-// setRecordModeWithIDInput 设置录像模式的请求参数（路径 ID + 请求体）
-// Mode 不能带 binding tag，否则 ShouldBindUri 阶段就会校验失败（URI 中无 mode 字段）
-type setRecordModeWithIDInput struct {
-	ID   string `uri:"id" binding:"required"`
-	Mode string `json:"mode" binding:"omitempty,oneof=always ai none"`
-}
-
 // ptzControlWithIDInput 云台控制的请求参数（路径 ID + 请求体）
 type ptzControlWithIDInput struct {
 	ID string `uri:"id" binding:"required"`
@@ -161,22 +154,21 @@ func registerGB28181(g gin.IRouter, api IPCAPI, handler ...gin.HandlerFunc) {
 	// 统一的通道管理 API（支持所有协议）
 	{
 		group := g.Group("/channels", handler...)
-		group.GET("", web.WrapH(api.listChannels))                   // 通道列表（所有协议）
-		group.POST("", web.WrapH(api.createChannel))                 // 添加通道（RTMP/RTSP）
-		group.PUT("/:id", web.WrapH(api.updateChannel))              // 修改通道（所有协议）
-		group.DELETE("/:id", web.WrapH(api.deleteChannel))           // 删除通道（RTMP/RTSP）
-		group.POST("/:id/play", web.WrapH(api.play))                 // 播放（所有协议）
-		group.POST("/:id/snapshot", web.WrapH(api.refreshSnapshot))  // 图像抓拍（所有协议）
-		group.GET("/:id/snapshot", api.getSnapshot)                  // 获取图像（所有协议）
-		group.POST("/:id/zones", web.WrapH(api.addZone))             // 添加区域（所有协议）
-		group.GET("/:id/zones", web.WrapH(api.getZones))             // 获取区域（所有协议）
-		group.DELETE("/:id/zones/:name", web.WrapH(api.deleteZone))  // 删除区域（所有协议）
-		group.POST("/:id/ai/enable", web.WrapH(api.enableAI))        // 启用 AI 检测
-		group.POST("/:id/ai/disable", web.WrapH(api.disableAI))      // 禁用 AI 检测
-		group.POST("/:id/record_mode", web.WrapH(api.setRecordMode)) // 设置录像模式
-		group.POST("/:id/ptz/control", web.WrapH(api.ptzControl))    // 云台控制（所有协议）
-		group.POST("/:id/stop", web.WrapH(api.stopPlay))             // 停止播放（所有协议）
-		group.GET("/:id/media_info", web.WrapH(api.getMediaInfo))    // 获取流详细信息（音视频编码等）
+		group.GET("", web.WrapH(api.listChannels))                  // 通道列表（所有协议）
+		group.POST("", web.WrapH(api.createChannel))                // 添加通道（RTMP/RTSP）
+		group.PUT("/:id", web.WrapH(api.updateChannel))             // 修改通道（所有协议）
+		group.DELETE("/:id", web.WrapH(api.deleteChannel))          // 删除通道（RTMP/RTSP）
+		group.POST("/:id/play", web.WrapH(api.play))                // 播放（所有协议）
+		group.POST("/:id/snapshot", web.WrapH(api.refreshSnapshot)) // 图像抓拍（所有协议）
+		group.GET("/:id/snapshot", api.getSnapshot)                 // 获取图像（所有协议）
+		group.POST("/:id/zones", web.WrapH(api.addZone))            // 添加区域（所有协议）
+		group.GET("/:id/zones", web.WrapH(api.getZones))            // 获取区域（所有协议）
+		group.DELETE("/:id/zones/:name", web.WrapH(api.deleteZone)) // 删除区域（所有协议）
+		group.POST("/:id/ai/enable", web.WrapH(api.enableAI))       // 启用 AI 检测
+		group.POST("/:id/ai/disable", web.WrapH(api.disableAI))     // 禁用 AI 检测
+		group.POST("/:id/ptz/control", web.WrapH(api.ptzControl))   // 云台控制（所有协议）
+		group.POST("/:id/stop", web.WrapH(api.stopPlay))            // 停止播放（所有协议）
+		group.GET("/:id/media_info", web.WrapH(api.getMediaInfo))   // 获取流详细信息（音视频编码等）
 	}
 }
 
@@ -381,7 +373,11 @@ func (a IPCAPI) deleteChannel(c *gin.Context, in *channelIDInput) (any, error) {
 	if !bz.IsRTMP(in.ID) && !bz.IsRTSP(in.ID) {
 		return nil, reason.ErrBadRequest.WithMsg("仅支持删除 RTMP/RTSP 类型通道")
 	}
-	return a.ipc.DeleteChannel(c.Request.Context(), in.ID)
+	out, err := a.ipc.DeleteChannel(c.Request.Context(), in.ID)
+	if err == nil {
+		_ = a.recordingCore.UnbindPlan(c.Request.Context(), in.ID)
+	}
+	return out, err
 }
 
 func (a IPCAPI) play(c *gin.Context, in *channelIDInput) (*playOutput, error) {
@@ -688,14 +684,13 @@ func (a IPCAPI) refreshSnapshot(c *gin.Context, in *refreshSnapshotWithIDInput) 
 		return nil, err
 	}
 
-	// 本地流不存在时，为快照临时创建 RTSP 拉流代理。none 模式抓图后释放；
-	// always/ai 模式由录像或分析任务继续持有。
+	// 本地流不存在时，为快照临时创建 RTSP 拉流代理；当前没有生效的
+	// 录像计划时在抓图后释放。
 	media, mediaErr := a.uc.SMSAPI.smsCore.GetMediaInfo(svr, ch.GetApp(), ch.GetStream())
 	temporaryProxy := mediaErr != nil || len(media) == 0
 	if temporaryProxy && ch.IsRTSP() {
 		if _, err := a.uc.SMSAPI.smsCore.CreateStreamProxy(svr, sms.AddStreamProxyRequest{
 			App: ch.GetApp(), Stream: ch.GetStream(), URL: ch.Config.SourceURL, RTPType: ch.Config.Transport,
-			PersistHLS: !ch.Ext.IsNoneRecord(),
 		}); err != nil {
 			return nil, err
 		}
@@ -711,7 +706,8 @@ func (a IPCAPI) refreshSnapshot(c *gin.Context, in *refreshSnapshotWithIDInput) 
 			return nil, reason.ErrServer.WithMsg("等待 RTSP 流上线超时")
 		}
 	}
-	if temporaryProxy && ch.Ext.IsNoneRecord() {
+	_, scheduled := a.recordingCore.ResolvePlan(c.Request.Context(), ch.ID, time.Now())
+	if temporaryProxy && !scheduled {
 		defer func() {
 			_, closeErr := a.uc.SMSAPI.smsCore.CloseStreams(svr, zlm.CloseStreamsRequest{
 				App: ch.GetApp(), Stream: ch.GetStream(), Force: true,
@@ -949,33 +945,6 @@ func (a IPCAPI) buildRTSPURL(ctx context.Context, channelID string) (string, err
 	}
 
 	return fmt.Sprintf("rtsp://%s:%d/%s/%s", "127.0.0.1", svr.Ports.RTSP, app, stream), nil
-}
-
-// setRecordMode 设置通道的录像模式，支持三种模式：always(一直录制)、ai(AI触发录制)、none(不录制)
-// always 和 ai 都会启用录制
-func (a IPCAPI) setRecordMode(c *gin.Context, in *setRecordModeWithIDInput) (gin.H, error) {
-	channelID := in.ID
-	ctx := c.Request.Context()
-
-	switch in.Mode {
-	case "always", "ai", "none":
-	default:
-		return nil, reason.ErrBadRequest.WithMsg("mode must be one of: always, ai, none")
-	}
-
-	// 更新通道的录像模式
-	channel, err := a.ipc.SetRecordMode(ctx, channelID, in.Mode)
-	if err != nil {
-		return nil, err
-	}
-
-	// HLS-fMP4 是否持久化在下一次源流发布时由 on_publish 决定。当前流
-	// 的 muxer 不支持无损热切换，避免在这里再次启动旧 MP4/TS 录像器。
-
-	return gin.H{
-		"id":          channel.ID,
-		"record_mode": channel.Ext.GetRecordMode(),
-	}, nil
 }
 
 // ptzControlInput PTZ 控制请求参数

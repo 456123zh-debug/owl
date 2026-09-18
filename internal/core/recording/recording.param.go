@@ -15,11 +15,12 @@ type FindRecordingInput struct {
 	Stream string `form:"stream"` // ZLM 流 ID
 
 	// 以下为内部字段，API 层不暴露，供 cleanup/timeline 使用
-	StartedAtBefore *time.Time `form:"-"` // started_at < value
-	StartedAtAfter  *time.Time `form:"-"` // started_at >= value
-	EndedAtAfter    *time.Time `form:"-"` // ended_at > value（timeline 重叠查询）
-	DeleteFlagEq    *bool      `form:"-"` // delete_flag = value
-	OrderBy         string     `form:"-"` // 覆盖默认排序，如 "started_at ASC"
+	StartedAtBefore   *time.Time `form:"-"` // started_at < value
+	StartedAtAfter    *time.Time `form:"-"` // started_at >= value
+	EndedAtAfter      *time.Time `form:"-"` // ended_at > value（timeline 重叠查询）
+	DeleteFlagEq      *bool      `form:"-"` // delete_flag = value
+	RetainUntilBefore *time.Time `form:"-"` // retain_until < value
+	OrderBy           string     `form:"-"` // 覆盖默认排序，如 "started_at ASC"
 }
 
 type EditRecordingInput struct {
@@ -27,14 +28,16 @@ type EditRecordingInput struct {
 }
 
 type AddRecordingInput struct {
-	CID       string   `json:"-"`          // 通道 ID（由 API 层填充）
-	App       string   `json:"app"`        // ZLM 应用名
-	Stream    string   `json:"stream"`     // ZLM 流 ID
-	StartedAt orm.Time `json:"started_at"` // 录像开始时间
-	EndedAt   orm.Time `json:"ended_at"`   // 录像结束时间
-	Duration  float64  `json:"duration"`   // 持续时长（秒）
-	Path      string   `json:"path"`       // 文件相对路径
-	Size      int64    `json:"size"`       // 文件大小（字节）
+	PlanID      int64     `json:"-"`
+	CID         string    `json:"-"`          // 通道 ID（由 API 层填充）
+	App         string    `json:"app"`        // ZLM 应用名
+	Stream      string    `json:"stream"`     // ZLM 流 ID
+	StartedAt   orm.Time  `json:"started_at"` // 录像开始时间
+	EndedAt     orm.Time  `json:"ended_at"`   // 录像结束时间
+	Duration    float64   `json:"duration"`   // 持续时长（秒）
+	Path        string    `json:"path"`       // 文件相对路径
+	Size        int64     `json:"size"`       // 文件大小（字节）
+	RetainUntil *orm.Time `json:"retain_until"`
 }
 
 // TimelineInput 时间轴查询参数

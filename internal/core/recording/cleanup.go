@@ -25,7 +25,6 @@ func (c Core) StartCleanupWorker() {
 	}
 
 	slog.Info("recording cleanup worker started",
-		"retain_days", c.conf.RetainDays,
 		"disk_threshold", c.conf.DiskUsageThreshold,
 		"storage_dir", c.conf.StorageDir,
 	)
@@ -56,26 +55,19 @@ func (c Core) StartCleanupWorker() {
 func (c Core) runCleanup() bool {
 	c.markExpiringRecordings()
 	c.cleanupExpiredRecordings()
-	c.cleanupOrphanDirs()
 	return c.cleanupByDiskUsage()
 }
 
 // markExpiringRecordings 预标记 1 小时内即将过期的录像
 func (c Core) markExpiringRecordings() {
-	if c.conf.RetainDays <= 0 {
-		return
-	}
-
 	ctx := context.Background()
-	// 计算 1 小时后的过期时间阈值
-	// 如果录像的 started_at < (now + 1h - retain_days)，则该录像将在 1 小时内过期
-	expiryCutoff := time.Now().Add(time.Hour).AddDate(0, 0, -c.conf.RetainDays)
+	expiryCutoff := time.Now().Add(time.Hour)
 
 	// 批量更新 delete_flag
 	err := c.store.Recording().Session(ctx, func(tx *gorm.DB) error {
 		return tx.Model(&Recording{}).
 			Where("delete_flag = ?", false).
-			Where("started_at < ?", orm.Time{Time: expiryCutoff}).
+			Where("retain_until < ?", orm.Time{Time: expiryCutoff}).
 			Update("delete_flag", true).Error
 	})
 	if err != nil {
@@ -85,25 +77,20 @@ func (c Core) markExpiringRecordings() {
 
 // cleanupExpiredRecordings 清理超过保留天数的录像
 func (c Core) cleanupExpiredRecordings() {
-	if c.conf.RetainDays <= 0 {
-		return
-	}
-
 	ctx := context.Background()
-	cutoffTime := time.Now().AddDate(0, 0, -c.conf.RetainDays)
+	cutoffTime := time.Now()
 
 	totalDeleted, filesDeleted, freedBytes, failedFiles := c.batchDeleteRecordings(ctx,
 		"expired",
 		&FindRecordingInput{
 			Page: 1, Size: 100,
-			StartedAtBefore: &cutoffTime,
+			RetainUntilBefore: &cutoffTime,
 		},
 	)
 
 	if totalDeleted > 0 || failedFiles > 0 {
 		slog.Info("expired recording cleanup completed",
 			"reason", "retention_policy",
-			"retain_days", c.conf.RetainDays,
 			"cutoff_time", cutoffTime.Format(time.DateTime),
 			"recordings_deleted", totalDeleted,
 			"files_deleted", filesDeleted,
@@ -465,44 +452,6 @@ func scanDateDirs(root string) []dateDirEntry {
 	}
 	scan(root)
 	return result
-}
-
-// cleanupOrphanDirs 按保留天数扫描文件系统，删除超龄的日期目录
-// 作为数据库清理的兜底：即使录像记录不在数据库中，
-// 只要日期目录超龄就会被清理，避免孤儿文件无限累积
-func (c Core) cleanupOrphanDirs() {
-	if c.conf.RetainDays <= 0 {
-		return
-	}
-
-	absStorageDir := c.getAbsStorageDir()
-	if _, err := os.Stat(absStorageDir); os.IsNotExist(err) {
-		return
-	}
-
-	// 目录日期按当日零点解析，cutoff 须同口径截断到本地零点再减保留天数，
-	// 否则保留期边界日的目录几乎恒判超龄，会被提前最多约 24 小时误删
-	now := time.Now()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	cutoff := todayStart.AddDate(0, 0, -c.conf.RetainDays)
-	dirs := scanDateDirs(absStorageDir)
-
-	var removedCount int
-	for _, d := range dirs {
-		if !d.date.Before(cutoff) {
-			continue
-		}
-		if err := os.RemoveAll(d.path); err != nil {
-			slog.Warn("删除过期日期目录失败", "path", d.path, "err", err)
-			continue
-		}
-		removedCount++
-		slog.Info("删除过期日期目录", "path", d.path, "date", d.date.Format("2006-01-02"))
-	}
-	if removedCount > 0 {
-		slog.Info("过期目录清理完成", "removed_dirs", removedCount)
-		cleanupEmptyDirs(absStorageDir)
-	}
 }
 
 // cleanupDiskByFilesystem 文件系统级磁盘清理兜底

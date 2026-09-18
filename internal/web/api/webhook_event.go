@@ -73,6 +73,13 @@ func (w WebHookAPI) onWebhookEvents(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": err.Error()})
 		return
 	}
+	if w.ipcCore.IsConfigured() {
+		if channel, channelErr := w.ipcCore.GetChannel(ctx, in.CID); channelErr == nil {
+			if _, recordErr := w.recordingCore.TriggerEvent(ctx, channel.ID, channel.GetApp(), channel.GetStream(), in.Label, in.Score, in.StartedAt.Time); recordErr != nil {
+				w.log.ErrorContext(ctx, "trigger forwarded event recording failed", "channel", channel.ID, "err", recordErr)
+			}
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok"})
 }
@@ -135,6 +142,11 @@ func (w WebHookAPI) handleAIEvents(c *gin.Context) {
 		})
 		if err != nil {
 			w.log.ErrorContext(ctx, "save event failed", "label", det.Label, "err", err)
+		}
+		if channel, channelErr := w.ipcCore.GetChannel(ctx, in.CameraID); channelErr == nil {
+			if _, recordErr := w.recordingCore.TriggerEvent(ctx, channel.ID, channel.GetApp(), channel.GetStream(), det.Label, float32(det.Confidence), in.Timestamp.Time); recordErr != nil {
+				w.log.ErrorContext(ctx, "trigger event recording failed", "channel", channel.ID, "err", recordErr)
+			}
 		}
 	}
 

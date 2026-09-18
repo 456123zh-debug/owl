@@ -10,6 +10,7 @@ import (
 	"github.com/gowvp/owl/internal/conf"
 	"github.com/gowvp/owl/internal/core/event"
 	"github.com/gowvp/owl/internal/core/ipc"
+	"github.com/gowvp/owl/internal/core/recording"
 	"github.com/gowvp/owl/internal/core/sms"
 	"github.com/gowvp/owl/internal/rpc"
 	"github.com/gowvp/owl/protos"
@@ -19,28 +20,30 @@ import (
 
 // AIWebhookAPI 处理 AI 分析服务的回调请求
 type AIWebhookAPI struct {
-	log       *slog.Logger
-	conf      *conf.Bootstrap
-	aiTasks   *conc.Map[string, struct{}]
-	limiter   func(identifier string) bool
-	ai        *rpc.AIClient
-	eventCore event.Core
-	ipcCore   ipc.Core
+	log           *slog.Logger
+	conf          *conf.Bootstrap
+	aiTasks       *conc.Map[string, struct{}]
+	limiter       func(identifier string) bool
+	ai            *rpc.AIClient
+	eventCore     event.Core
+	ipcCore       ipc.Core
+	recordingCore recording.Core
 	// smsCore 在 StartAISyncLoop 时注入，供 ReloadAITask 使用
 	smsCore      sms.Core
 	smsCoreReady bool
 }
 
 // NewAIWebhookAPI 创建 AI Webhook API 实例
-func NewAIWebhookAPI(conf *conf.Bootstrap, eventCore event.Core, ipcCore ipc.Core) AIWebhookAPI {
+func NewAIWebhookAPI(conf *conf.Bootstrap, eventCore event.Core, ipcCore ipc.Core, recordingCore recording.Core) AIWebhookAPI {
 	return AIWebhookAPI{
-		log:       slog.With("hook", "ai"),
-		conf:      conf,
-		ai:        rpc.NewAIClient("127.0.0.1:50051"),
-		aiTasks:   conc.NewMap[string, struct{}](),
-		eventCore: eventCore,
-		ipcCore:   ipcCore,
-		limiter:   web.IDRateLimiter(0.2, 1, 3*time.Minute),
+		log:           slog.With("hook", "ai"),
+		conf:          conf,
+		ai:            rpc.NewAIClient("127.0.0.1:50051"),
+		aiTasks:       conc.NewMap[string, struct{}](),
+		eventCore:     eventCore,
+		ipcCore:       ipcCore,
+		recordingCore: recordingCore,
+		limiter:       web.IDRateLimiter(0.2, 1, 3*time.Minute),
 	}
 }
 
@@ -144,7 +147,7 @@ func (a *AIWebhookAPI) syncAITasks(ctx context.Context, smsCore sms.Core) {
 	// 构建数据库中 enabled_ai=true 的通道集合
 	dbEnabledSet := make(map[string]*ipc.Channel)
 	for _, ch := range channels {
-		if ch.Ext.EnabledAI {
+		if ch.Ext.EnabledAI && a.planAIEnabled(ctx, ch.ID) {
 			dbEnabledSet[ch.ID] = ch
 		}
 	}
@@ -175,6 +178,11 @@ func (a *AIWebhookAPI) syncAITasks(ctx context.Context, smsCore sms.Core) {
 			}
 		}
 	}
+}
+
+func (a *AIWebhookAPI) planAIEnabled(ctx context.Context, channelID string) bool {
+	plan, active := a.recordingCore.ResolvePlan(ctx, channelID, time.Now())
+	return active && plan.AIEnabled
 }
 
 // startAITask 启动单个通道的 AI 检测任务（内部使用，自动构建 RTSP URL）

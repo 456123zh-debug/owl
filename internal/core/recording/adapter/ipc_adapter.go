@@ -19,7 +19,7 @@ func NewIPCAdapter(ipcCore ipc.Core) recording.IPCProvider {
 	return &IPCAdapter{ipcCore: ipcCore}
 }
 
-// ListOnlineChannels 查询所有在线通道，包含 RecordMode 供同步逻辑分类
+// ListOnlineChannels 查询所有在线通道。
 func (a *IPCAdapter) ListOnlineChannels(ctx context.Context) ([]recording.ChannelInfo, error) {
 	channels, _, err := a.ipcCore.ListChannels(ctx, &ipc.FindChannelInput{
 		Page: 1, Size: 9999,
@@ -32,11 +32,10 @@ func (a *IPCAdapter) ListOnlineChannels(ctx context.Context) ([]recording.Channe
 	result := make([]recording.ChannelInfo, 0, len(channels))
 	for _, ch := range channels {
 		result = append(result, recording.ChannelInfo{
-			ID:         ch.ID,
-			App:        ch.GetApp(),
-			Stream:     ch.GetStream(),
-			Type:       ch.GetType(),
-			RecordMode: ch.Ext.GetRecordMode(),
+			ID:     ch.ID,
+			App:    ch.GetApp(),
+			Stream: ch.GetStream(),
+			Type:   ch.GetType(),
 		})
 	}
 	return result, nil

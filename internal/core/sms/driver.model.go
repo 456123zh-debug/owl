@@ -3,12 +3,10 @@ package sms
 import "github.com/gowvp/owl/pkg/zlm"
 
 type AddStreamProxyRequest struct {
-	App        string `json:"app"`      // 添加的流的应用名，例如 live
-	Stream     string `json:"stream"`   // 添加的流的 id 名，例如 test
-	URL        string `json:"url"`      // 拉流地址，例如 rtmp://live.hkstv.hk.lxdns.com/live/hks2
-	RTPType    int    `json:"rtp_type"` // rtsp 拉流时，拉流方式，0：tcp，1：udp，2：组播
-	PersistHLS bool   `json:"-"`        // 将 HLS-fMP4 分片持久化到录像目录
-
+	App     string `json:"app"`      // 添加的流的应用名，例如 live
+	Stream  string `json:"stream"`   // 添加的流的 id 名，例如 test
+	URL     string `json:"url"`      // 拉流地址，例如 rtmp://live.hkstv.hk.lxdns.com/live/hks2
+	RTPType int    `json:"rtp_type"` // rtsp 拉流时，拉流方式，0：tcp，1：udp，2：组播
 	// Vhost         string  `json:"vhost"`                     // 添加的流的虚拟主机，例如__defaultVhost__
 	// RetryCount    int     `json:"retry_count"`               // 拉流重试次数，默认为-1 无限重试
 	// TimeoutSec    float32 `json:"timeout_sec"`               // 拉流超时时间，单位秒，float 类型

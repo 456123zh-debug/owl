@@ -31,9 +31,6 @@ func Run(bc *conf.Bootstrap) {
 	if bc.Server.Recording.HLSFragmentSeconds <= 0 {
 		bc.Server.Recording.HLSFragmentSeconds = 10
 	}
-	if bc.Server.Recording.RetainDays <= 0 {
-		bc.Server.Recording.RetainDays = 3
-	}
 	if bc.Server.Recording.StorageDir == "" {
 		bc.Server.Recording.StorageDir = "./configs/recordings"
 	}

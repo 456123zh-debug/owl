@@ -51,8 +51,6 @@
     Disabled = false
     # 录像存储根目录（相对于工作目录）
     StorageDir = './configs/recordings'
-    # 录像保留天数（超过则清理）
-    RetainDays = 3
     # 磁盘使用率阈值（百分比），超过则触发循环覆盖
     DiskUsageThreshold = 98.0
     # HLS-fMP4 目标分片时长（秒）；实际分片边界跟随源流关键帧/GOP

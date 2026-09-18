@@ -31,12 +31,17 @@ func (d DB) Recording() recording.RecordingStorer {
 
 // AutoMigrate sync database
 func (d DB) AutoMigrate(ok bool) DB {
-	if !ok {
-		return d
+	models := []any{
+		new(recording.RecordingPlan),
+		new(recording.ChannelRecordingPlan),
 	}
-	if err := d.db.AutoMigrate(
-		new(recording.Recording),
-	); err != nil {
+	// Recording plan tables are part of the current runtime contract and must
+	// exist even when legacy/global auto-migration is disabled in a packaged
+	// deployment. They are additive and safe for existing databases.
+	if ok {
+		models = append([]any{new(recording.Recording)}, models...)
+	}
+	if err := d.db.AutoMigrate(models...); err != nil {
 		panic(err)
 	}
 	return d

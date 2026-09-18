@@ -82,6 +82,20 @@ func RegisterRecording(g gin.IRouter, api RecordingAPI, handler ...gin.HandlerFu
 		// Internal HLS route consumed by players; it is intentionally omitted from OpenAPI.
 		group.GET("/channels/:cid/index.m3u8", api.channelPlaylist)
 	}
+	{
+		group := g.Group("/recording-plans", handler...)
+		group.GET("", web.WrapH(api.listPlans))
+		group.POST("", web.WrapH(api.createPlan))
+		group.GET("/:id", web.WrapH(api.getPlan))
+		group.PUT("/:id", web.WrapH(api.updatePlan))
+		group.DELETE("/:id", web.WrapH(api.deletePlan))
+	}
+	{
+		group := g.Group("/channels", handler...)
+		group.GET("/:id/recording-plan", web.WrapH(api.getChannelPlan))
+		group.PUT("/:id/recording-plan", web.WrapH(api.bindChannelPlan))
+		group.DELETE("/:id/recording-plan", web.WrapH(api.unbindChannelPlan))
+	}
 
 	// 静态文件服务，用于访问录像 MP4 文件
 	// 路径格式: /static/recordings/xxx.mp4?token=xxx
@@ -90,6 +104,42 @@ func RegisterRecording(g gin.IRouter, api RecordingAPI, handler ...gin.HandlerFu
 		slog.Info("注册录像静态文件服务", "path", "/static/recordings", "dir", api.conf.Server.Recording.StorageDir)
 		g.Group("/static", handler...).Static("/recordings", api.conf.Server.Recording.StorageDir)
 	}
+}
+
+type planIDInput struct {
+	ID int64 `uri:"id" binding:"required"`
+}
+type channelPlanInput struct {
+	ID     string `uri:"id" binding:"required"`
+	PlanID int64  `json:"plan_id" binding:"required"`
+}
+
+func (a RecordingAPI) listPlans(c *gin.Context, _ *struct{}) (any, error) {
+	return a.recordingCore.ListPlans(c.Request.Context())
+}
+func (a RecordingAPI) createPlan(c *gin.Context, in *recording.PlanInput) (*recording.RecordingPlan, error) {
+	return a.recordingCore.CreatePlan(c.Request.Context(), in)
+}
+func (a RecordingAPI) getPlan(c *gin.Context, in *planIDInput) (*recording.RecordingPlan, error) {
+	return a.recordingCore.GetPlan(c.Request.Context(), in.ID)
+}
+func (a RecordingAPI) updatePlan(c *gin.Context, in *struct {
+	ID int64 `uri:"id" binding:"required"`
+	recording.PlanInput
+}) (*recording.RecordingPlan, error) {
+	return a.recordingCore.UpdatePlan(c.Request.Context(), in.ID, &in.PlanInput)
+}
+func (a RecordingAPI) deletePlan(c *gin.Context, in *planIDInput) (gin.H, error) {
+	return gin.H{"deleted": true}, a.recordingCore.DeletePlan(c.Request.Context(), in.ID)
+}
+func (a RecordingAPI) getChannelPlan(c *gin.Context, in *channelIDInput) (*recording.ChannelRecordingPlan, error) {
+	return a.recordingCore.GetChannelPlan(c.Request.Context(), in.ID)
+}
+func (a RecordingAPI) bindChannelPlan(c *gin.Context, in *channelPlanInput) (*recording.ChannelRecordingPlan, error) {
+	return a.recordingCore.BindPlan(c.Request.Context(), in.ID, in.PlanID)
+}
+func (a RecordingAPI) unbindChannelPlan(c *gin.Context, in *channelIDInput) (gin.H, error) {
+	return gin.H{"unbound": true}, a.recordingCore.UnbindPlan(c.Request.Context(), in.ID)
 }
 
 func (a RecordingAPI) getPlayURL(c *gin.Context, in *recording.RangeInput) (*recordingPlayOutput, error) {

@@ -31,7 +31,7 @@ S.LoginOutput = obj({ token: str(), user: str() });
 S.PublicKey = obj({ key: str("Base64 编码的 PKIX 公钥") });
 S.CredentialsInput = obj({ data: str("RSA-OAEP 加密后的凭据 JSON，Base64") }, ["data"]);
 S.Pager = obj({ page: int("int32"), size: int("int32"), sort: str() });
-S.DeviceExt = obj({ manufacturer: str(), model: str(), firmware: str(), name: str(), gb_version: str(), zones: arr(ref("Zone")), enabled_ai: bool(), analysis_interval: num(), record_mode: str("always、ai、none") });
+S.DeviceExt = obj({ manufacturer: str(), model: str(), firmware: str(), name: str(), gb_version: str(), zones: arr(ref("Zone")), enabled_ai: bool(), analysis_interval: num() });
 S.Zone = obj({ name: str(), coordinates: arr({ type: "number", format: "float" }), color: str(), labels: arr(str()) });
 S.StreamConfig = obj({ is_auth_disabled: bool(), session: str(), pushed_at: { type: "string", format: "date-time", nullable: true }, stopped_at: { type: "string", format: "date-time", nullable: true }, media_server_id: str(), push_addr: str(), source_url: str(), transport: int("int32"), timeout_s: int("int32"), enabled_audio: bool(), enabled_remove_none_reader: bool(), enabled_disabled_none_reader: bool(), stream_key: str(), enabled: bool() });
 S.Channel = obj({ id: str(), did: str(), device_id: str(), channel_id: str(), name: str(), ptz: int("int32"), is_online: bool(), is_playing: bool(), ext: ref("DeviceExt"), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" }, type: str(), app: str(), stream: str(), config: ref("StreamConfig"), has_recording: bool() });
@@ -43,9 +43,13 @@ S.EditChannel = obj({ device_id: str(), name: str(), ptztype: int("int32"), is_o
 S.AddZone = obj({ name: str(), coordinates: arr({ type: "number", format: "float" }), color: str(), labels: arr(str()) });
 S.PlayOutput = obj({ app: str(), stream: str(), items: arr(obj({ type: str(), url: str(), label: str(), protocol: str(), token: str() })) });
 S.SnapshotLink = obj({ link: str() });
-S.RecordMode = obj({ id: str(), record_mode: str() });
+S.SchedulePeriod = obj({ days: arr({ type: "integer", format: "int32", minimum: 1, maximum: 7, description: "ISO 星期：1=星期一，7=星期日" }), start: str("HH:mm"), end: str("HH:mm；小于 start 表示跨午夜") }, ["days", "start", "end"]);
+S.EventRecordingConfig = obj({ event_types: arr(str("空数组表示所有事件类型")), min_confidence: { ...num("最小置信度，0-1"), minimum: 0, maximum: 1 }, post_record_seconds: { ...int("int32", "仅告警事件录像使用：告警后录像秒数"), minimum: 1, maximum: 3600 }, merge_interval_seconds: { ...int("int32", "仅告警事件录像使用：相邻告警录像合并窗口秒数"), minimum: 0 } });
+S.RecordingPlanInput = obj({ name: str(), enabled: bool(), timezone: str("IANA 时区，例如 Asia/Shanghai"), record_type: { type: "string", enum: ["continuous", "event"], description: "continuous=计划内持续录像；event=仅告警时录像" }, ai_enabled: bool("是否启动该计划通道的 AI 分析；false 时不消耗 AI 推理资源"), weekly_schedule: arr(ref("SchedulePeriod")), retention_days: { ...int("int32"), minimum: 1, maximum: 3650 }, event_config: { ...ref("EventRecordingConfig"), description: "ai_enabled=false 时忽略；持续录像模式下只关联告警，不会额外启动录像；event模式下用于触发录像" } }, ["name", "enabled", "record_type", "ai_enabled", "weekly_schedule", "retention_days"]);
+S.RecordingPlan = obj({ id: int(), name: str(), enabled: bool(), timezone: str(), record_type: str(), ai_enabled: bool(), weekly_schedule: arr(ref("SchedulePeriod")), retention_days: int("int32"), event_config: ref("EventRecordingConfig"), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } });
+S.ChannelRecordingPlan = obj({ channel_id: str(), plan_id: int(), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" }, plan: ref("RecordingPlan") });
 S.PTZ = obj({ action: str("continuous、stop、absolute、relative、preset"), direction: str(), speed: num(), x: num(), y: num(), zoom: num(), preset_id: str(), preset_op: str("goto、set、remove") });
-S.Recording = obj({ id: int("int64", "fMP4 媒体分片记录 ID"), cid: str("通道 ID"), app: str("流应用名"), stream: str("流名称"), started_at: { type: "string", format: "date-time", description: "分片开始时间" }, ended_at: { type: "string", format: "date-time", description: "分片结束时间" }, duration: num("按源流关键帧/GOP 对齐的实际时长（秒）"), path: str(".m4s 分片的相对路径或静态访问地址"), size: int("int64", "fMP4 媒体分片大小（字节）"), object_count: int("int32", "分片内检测对象数量"), delete_flag: bool("是否已标记删除"), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } });
+S.Recording = obj({ id: int("int64", "fMP4 媒体分片记录 ID"), plan_id: { ...int("int64", "产生该分片的录像计划 ID；旧分片可能为 0"), nullable: true }, cid: str("通道 ID"), app: str("流应用名"), stream: str("流名称"), started_at: { type: "string", format: "date-time", description: "分片开始时间" }, ended_at: { type: "string", format: "date-time", description: "分片结束时间" }, retain_until: { type: "string", format: "date-time", nullable: true, description: "按计划计算的删除时间；旧分片可能为空" }, duration: num("按源流关键帧/GOP 对齐的实际时长（秒）"), path: str(".m4s 分片的相对路径或静态访问地址"), size: int("int64", "fMP4 媒体分片大小（字节）"), object_count: int("int32", "分片内检测对象数量"), delete_flag: bool("是否已标记删除"), created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } });
 S.RecordingPlay = obj({ url: { type: "string", format: "uri", description: "带鉴权参数的 HLS-fMP4 播放地址", example: "http://localhost:19123/recordings/channels/spjr0ms/index.m3u8?start_ms=1789650000000&end_ms=1789653600000&token=Bearer%20eyJ..." } }, ["url"]);
 S.DeleteRecordings = obj({ deleted: { ...int("int32", "删除的数据库分片数"), example: 360 }, files_deleted: { ...int("int32", "删除的媒体分片数"), example: 360 }, failed_files: { ...int("int32", "删除失败的文件数"), example: 0 }, freed_bytes: { ...int("int64", "释放的磁盘字节数"), example: 524288000 } });
 S.MonthlyStats = obj({ year: { ...int("int32"), example: 2026 }, month: { ...int("int32"), example: 9 }, days: { ...int("int32"), example: 30 }, has_video: { ...str("从第 1 天开始的录像日期位图，1 表示当天有录像"), example: "000000000000000011000000000000" } });
@@ -94,7 +98,7 @@ const folderFor = (path) => {
   if (path === "/login" || path === "/login/key" || path === "/users") return "认证";
   if (path.startsWith("/devices") || path === "/gb28181/snapshot") return "设备";
   if (path.startsWith("/channels")) return "通道";
-  if (path.startsWith("/recordings") || path.startsWith("/static/recordings")) return "录像";
+  if (path.startsWith("/recordings") || path.startsWith("/recording-plans") || path.startsWith("/static/recordings")) return "录像";
   if (path.startsWith("/events")) return "事件";
   if (path.startsWith("/media_servers") || path.startsWith("/proxy/sms")) return "流媒体";
   if (path.startsWith("/configs")) return "配置";
@@ -151,9 +155,16 @@ add("/channels/{id}/zones", "get", "获取检测区域", pathId(), ref("ZoneList
 add("/channels/{id}/zones/{name}", "delete", "删除检测区域", merge(pathId(), pathId("name")), ref("ZoneList"), true);
 add("/channels/{id}/ai/enable", "post", "启用 AI 检测", pathId(), obj({ enabled: bool(), message: str(), source_width: int("int32"), source_height: int("int32"), source_fps: num() }), true);
 add("/channels/{id}/ai/disable", "post", "禁用 AI 检测", pathId(), obj({ enabled: bool(), message: str() }), true);
-add("/channels/{id}/record_mode", "post", "设置录像模式", merge(pathId(), json(obj({ mode: str("always、ai、none") }), true)), ref("RecordMode"), true);
+add("/channels/{id}/recording-plan", "get", "查询通道录像计划", pathId(), ref("ChannelRecordingPlan"), true);
+add("/channels/{id}/recording-plan", "put", "绑定通道录像计划", merge(pathId(), json(obj({ plan_id: int() }, ["plan_id"]), true)), ref("ChannelRecordingPlan"), true);
+add("/channels/{id}/recording-plan", "delete", "解绑通道录像计划", pathId(), obj({ unbound: bool() }), true);
 add("/channels/{id}/ptz/control", "post", "云台控制", merge(pathId(), json(ref("PTZ"), true)), ref("Msg"), true);
 add("/channels/{id}/media_info", "get", "获取流媒体信息", pathId(), ref("MediaInfo"), true);
+add("/recording-plans", "get", "录像计划列表", {}, arr(ref("RecordingPlan")), true);
+add("/recording-plans", "post", "新建录像计划", json(ref("RecordingPlanInput"), true), ref("RecordingPlan"), true);
+add("/recording-plans/{id}", "get", "录像计划详情", pathId("id", int()), ref("RecordingPlan"), true);
+add("/recording-plans/{id}", "put", "更新录像计划", merge(pathId("id", int()), json(ref("RecordingPlanInput"), true)), ref("RecordingPlan"), true);
+add("/recording-plans/{id}", "delete", "删除录像计划并解绑通道", pathId("id", int()), obj({ deleted: bool() }), true);
 const recordingRange = () => query(
   p("cid", "query", { ...str("通道 ID"), example: "spjr0ms" }, true),
   p("start_ms", "query", { ...int("int64", "开始时间戳（毫秒）"), example: 1789650000000 }, true),

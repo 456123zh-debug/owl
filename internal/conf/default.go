@@ -35,7 +35,6 @@ func DefaultConfig() Bootstrap {
 			Recording: ServerRecording{
 				Disabled:           false,
 				StorageDir:         "./configs/recordings",
-				RetainDays:         3,
 				DiskUsageThreshold: 95.0,
 				HLSFragmentSeconds: 10,
 			},
